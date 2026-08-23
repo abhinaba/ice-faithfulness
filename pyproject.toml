@@ -1,6 +1,6 @@
 [build-system]
 requires = ["setuptools>=64", "wheel"]
-build-backend = "setuptools.backends._legacy:_Backend"
+build-backend = "setuptools.build_meta"
 
 [project]
 name = "ice-faithfulness"
@@ -35,7 +35,7 @@ full = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/abhinababasu/ice-faithfulness"
+Homepage = "https://github.com/abhinaba/ice-faithfulness"
 Paper = "https://arxiv.org/abs/2603.18579"
 
 [tool.setuptools.packages.find]
