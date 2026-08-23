@@ -1,0 +1,42 @@
+[build-system]
+requires = ["setuptools>=64", "wheel"]
+build-backend = "setuptools.backends._legacy:_Backend"
+
+[project]
+name = "ice-faithfulness"
+version = "1.0.0"
+description = "ICE: Intervention-Consistent Explanation Evaluation for LLMs"
+readme = "README.md"
+license = {text = "MIT"}
+authors = [
+    {name = "Abhinaba Basu", email = "mail@abhinaba.com"},
+    {name = "Pavan Chakraborty", email = "pavan@iiita.ac.in"},
+]
+requires-python = ">=3.8"
+dependencies = [
+    "numpy>=1.21",
+    "scipy>=1.7",
+    "torch>=1.10",
+    "transformers>=4.20",
+]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Text Processing :: Linguistic",
+]
+
+[project.optional-dependencies]
+full = [
+    "pandas",
+    "datasets",
+    "peft",
+    "accelerate",
+]
+
+[project.urls]
+Homepage = "https://github.com/abhinababasu/ice-faithfulness"
+Paper = "https://arxiv.org/abs/2603.18579"
+
+[tool.setuptools.packages.find]
+include = ["ice*"]
