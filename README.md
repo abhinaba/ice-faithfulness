@@ -64,13 +64,13 @@ print(f"Operators agree: {result.operators_agree}")
 
 ```bash
 # English benchmarks (7 models x 4 tasks)
-python run_ice_eval.py --model llama-3.2-3b --dataset sst2
+python scripts_for_repo/run_ice_llm.py --model llama-3.2-3b --dataset sst2
 
 # Multilingual (6 languages)
-python run_multilingual.py --model qwen-2.5-7b --lang french
+python scripts_for_repo/run_ice_multilingual.py --model qwen-2.5-7b --lang french
 
 # Operator comparison
-python run_retrieval.py --model mistral-7b --dataset esnli
+python scripts_for_repo/run_ice_llm_retrieval.py --model mistral-7b --dataset esnli
 ```
 
 ## Key Metrics
