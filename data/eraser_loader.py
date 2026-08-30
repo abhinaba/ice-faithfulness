@@ -11,9 +11,7 @@ Loads datasets from the ERASER benchmark:
 
 import torch
 from torch.utils.data import Dataset, DataLoader
-from typing import Dict, List, Optional, Tuple
-from pathlib import Path
-import json
+from typing import Dict, Optional
 from datasets import load_dataset
 from transformers import PreTrainedTokenizer
 
@@ -86,9 +84,13 @@ class ESNLIDataset(ERASERDataset):
         self._load_data(max_examples)
     
     def _load_data(self, max_examples: int = None):
-        """Load e-SNLI from HuggingFace datasets"""
-        # Use esnli dataset for consistency across all scripts
-        dataset = _load_dataset_pinned("esnli", split=self.split, revision=self.revision)
+        """Load SNLI from HuggingFace datasets.
+
+        The legacy script-based "esnli" repo is unsupported by datasets>=3.0.
+        We only need premise/hypothesis/label (not the human explanations),
+        which SNLI provides with identical splits and label encoding.
+        """
+        dataset = _load_dataset_pinned("stanfordnlp/snli", split=self.split, revision=self.revision)
         
         # Filter out examples with -1 label (unlabeled)
         dataset = dataset.filter(lambda x: x["label"] != -1)
@@ -171,8 +173,12 @@ class MultiRCDataset(ERASERDataset):
         self._load_data(max_examples)
     
     def _load_data(self, max_examples: int = None):
-        """Load MultiRC from HuggingFace datasets"""
-        dataset = _load_dataset_pinned("super_glue", "multirc", split=self.split, revision=self.revision)
+        """Load MultiRC from HuggingFace datasets.
+
+        Uses the parquet mirror aps/super_glue: the legacy script-based
+        "super_glue" repo is unsupported by datasets>=3.0.
+        """
+        dataset = _load_dataset_pinned("aps/super_glue", "multirc", split=self.split, revision=self.revision)
         
         if max_examples:
             dataset = dataset.select(range(min(max_examples, len(dataset))))
@@ -217,7 +223,7 @@ class MovieReviewDataset(ERASERDataset):
     
     def _load_data(self, max_examples: int = None):
         """Load SST-2 from HuggingFace datasets"""
-        dataset = _load_dataset_pinned("glue", "sst2", split=self.split, revision=self.revision)
+        dataset = _load_dataset_pinned("nyu-mll/glue", "sst2", split=self.split, revision=self.revision)
         
         if max_examples:
             dataset = dataset.select(range(min(max_examples, len(dataset))))
@@ -255,7 +261,7 @@ class IMDBDataset(ERASERDataset):
     
     def _load_data(self, max_examples: int = None):
         """Load IMDB from HuggingFace datasets"""
-        dataset = _load_dataset_pinned("imdb", split=self.split, revision=self.revision)
+        dataset = _load_dataset_pinned("stanfordnlp/imdb", split=self.split, revision=self.revision)
         
         if max_examples:
             dataset = dataset.select(range(min(max_examples, len(dataset))))

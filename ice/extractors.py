@@ -11,8 +11,28 @@ Implements common explanation methods for extracting token-level importance:
 import torch
 import torch.nn.functional as F
 import numpy as np
-from typing import Dict, List, Tuple, Optional
+from typing import Optional
 from abc import ABC, abstractmethod
+
+
+def _force_eager_attention(model):
+    """Switch a loaded model to eager attention so output_attentions works.
+
+    SDPA / flash attention silently return an empty attentions tuple, which
+    breaks attention-based extraction. Tries the transformers>=4.48 API first,
+    then falls back to setting the private config attribute.
+    """
+    try:
+        if hasattr(model, "set_attn_implementation"):
+            model.set_attn_implementation("eager")
+        elif hasattr(model, "config") and hasattr(model.config, "_attn_implementation"):
+            model.config._attn_implementation = "eager"
+    except Exception:
+        # Best-effort: the forward-pass guard will raise a clear error if
+        # attentions are still unavailable.
+        pass
+    if hasattr(model, "config"):
+        model.config.output_attentions = True
 
 
 class BaseRationaleExtractor(ABC):
@@ -90,8 +110,8 @@ class AttentionExtractor(BaseRationaleExtractor):
     """
     
     def __init__(
-        self, 
-        model, 
+        self,
+        model,
         tokenizer,
         layer: int = -1,  # Which layer to use (-1 = last)
         head_aggregation: str = "mean",  # "mean", "max", or specific head index
@@ -100,7 +120,8 @@ class AttentionExtractor(BaseRationaleExtractor):
         super().__init__(model, tokenizer, device)
         self.layer = layer
         self.head_aggregation = head_aggregation
-    
+        _force_eager_attention(self.model)
+
     def get_importance_scores(
         self,
         input_ids: torch.Tensor,
@@ -123,11 +144,13 @@ class AttentionExtractor(BaseRationaleExtractor):
                 output_attentions=True
             )
         
-        # Check if attentions are available
-        if outputs.attentions is None:
+        # Check if attentions are available (SDPA/flash attention returns an
+        # EMPTY tuple rather than None when output_attentions is unsupported)
+        if not outputs.attentions:
             raise RuntimeError(
                 "Model did not return attention weights. "
-                "Ensure model config has output_attentions=True or use a different extractor."
+                "Load the model with attn_implementation='eager' "
+                "or use a different extractor."
             )
         
         # Get attention from specified layer
@@ -538,8 +561,8 @@ def get_extractor(
     Factory function to get rationale extractor by name.
     
     Args:
-        name: "attention", "gradient", "integrated_gradients", "lime", 
-              "llm_attention", "llm_gradient", or "prompting"
+        name: "attention", "gradient", "integrated_gradients", "lime",
+              "llm_attention", or "llm_gradient"
         model: The model to explain
         tokenizer: Associated tokenizer
         device: Device to run on
@@ -587,13 +610,8 @@ class LLMAttentionExtractor(BaseRationaleExtractor):
         super().__init__(model, tokenizer, device)
         self.layer_aggregation = layer_aggregation
         self.head_aggregation = head_aggregation
-        
-        # Try to enable attention output
-        if hasattr(self.model, 'config'):
-            self.model.config.output_attentions = True
-            # Force eager attention for models using SDPA
-            if hasattr(self.model.config, '_attn_implementation'):
-                self.model.config._attn_implementation = "eager"
+        # Enable attention output / force eager attention for SDPA models
+        _force_eager_attention(self.model)
     
     def get_importance_scores(
         self,
@@ -631,11 +649,15 @@ class LLMAttentionExtractor(BaseRationaleExtractor):
             raise
         
         # Get attention weights: tuple of (batch, heads, seq_len, seq_len) per layer
+        # (SDPA/flash attention returns an EMPTY tuple when unsupported)
         attentions = outputs.attentions
-        
-        if attentions is None:
-            raise RuntimeError("Model did not return attention weights. "
-                             "Use a model that supports output_attentions=True")
+
+        if not attentions:
+            raise RuntimeError(
+                "Model did not return attention weights. Load the model with "
+                "attn_implementation='eager' or use a model that supports "
+                "output_attentions=True"
+            )
         
         # Stack all layers: (n_layers, batch, heads, seq_len, seq_len)
         # Move to CPU first to handle multi-GPU (layers on different devices)
@@ -644,7 +666,6 @@ class LLMAttentionExtractor(BaseRationaleExtractor):
         
         # Get attention FROM last token TO all tokens
         # Shape: (n_layers, batch, heads, seq_len)
-        seq_len = stacked.shape[-1]
         last_token_attention = stacked[:, :, :, -1, :]  # Attention from last position
         
         # Aggregate across heads

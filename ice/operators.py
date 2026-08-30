@@ -7,7 +7,7 @@ Defines operator families for faithfulness evaluation:
 """
 
 from abc import ABC, abstractmethod
-from typing import List, Tuple, Optional
+from typing import List
 import torch
 from dataclasses import dataclass
 
@@ -85,7 +85,6 @@ class DeletionOperator(BaseOperator):
         rationale_mask: torch.Tensor
     ) -> InterventionResult:
         """Keep only rationale tokens (and optionally special tokens)"""
-        device = input_ids.device
         original_length = attention_mask.sum().item()
         
         if self.keep_special_tokens:
@@ -113,7 +112,6 @@ class DeletionOperator(BaseOperator):
         rationale_mask: torch.Tensor
     ) -> InterventionResult:
         """Remove rationale tokens (keep non-rationale and special tokens)"""
-        device = input_ids.device
         original_length = attention_mask.sum().item()
         
         if self.keep_special_tokens:
@@ -135,11 +133,27 @@ class DeletionOperator(BaseOperator):
         
 
     def get_baseline_input(self, tokenizer):
-        """Return minimal valid input for this operator family."""
+        """Return minimal valid input for this operator family.
+
+        Encoder tokenizers map "" to [CLS][SEP]; causal-LM tokenizers map it
+        to an EMPTY sequence, which would crash the model forward pass, so we
+        fall back to a single special token in that case.
+        """
         encoded = tokenizer("", return_tensors="pt")
+        if encoded['input_ids'].numel() == 0:
+            fallback_id = None
+            for attr in ['bos_token_id', 'eos_token_id', 'pad_token_id', 'unk_token_id']:
+                token_id = getattr(tokenizer, attr, None)
+                if token_id is not None:
+                    fallback_id = token_id
+                    break
+            if fallback_id is None:
+                fallback_id = 0
+            ids = torch.tensor([[fallback_id]])
+            return ids, torch.ones_like(ids)
         return encoded['input_ids'], encoded['attention_mask']
 
-    
+
 
 
 class MaskOperator(BaseOperator):
@@ -238,9 +252,12 @@ class MaskOperator(BaseOperator):
             or getattr(tokenizer, 'eos_token', None)
         )
         if mask_str is None:
-            # Last resort: empty input
-            encoded = tokenizer("", return_tensors="pt")
-            return encoded['input_ids'], encoded['attention_mask']
+            # Last resort: single-token input (empty sequences crash causal LMs)
+            fallback_id = getattr(tokenizer, 'unk_token_id', None)
+            if fallback_id is None:
+                fallback_id = 0
+            ids = torch.tensor([[fallback_id]])
+            return ids, torch.ones_like(ids)
         # Create a short sequence of just mask tokens
         mask_seq = " ".join([mask_str] * 5)
         encoded = tokenizer(mask_seq, return_tensors="pt")
@@ -298,7 +315,7 @@ def create_ice_lite_operators(tokenizer) -> List[BaseOperator]:
             DeletionOperator(tokenizer, keep_special_tokens=True),
             RetrievalInfillOperator(tokenizer)
         ]
-    except (ImportError, Exception):
+    except ImportError:
         return [
             DeletionOperator(tokenizer, keep_special_tokens=True),
             MaskOperator(tokenizer, mask_token="mask")

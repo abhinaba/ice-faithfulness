@@ -9,10 +9,8 @@ Implements:
 
 import numpy as np
 import torch
-from typing import Dict, List, Tuple, Optional, Callable
+from typing import Dict, List, Tuple, Callable
 from dataclasses import dataclass
-from scipy import stats
-from tqdm import tqdm
 
 
 @dataclass

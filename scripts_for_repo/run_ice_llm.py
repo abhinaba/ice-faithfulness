@@ -24,14 +24,12 @@ import numpy as np
 from datetime import datetime
 from tqdm import tqdm
 from transformers import (
-    AutoModelForCausalLM, 
-    AutoModelForSequenceClassification,
+    AutoModelForCausalLM,
     AutoTokenizer,
     BitsAndBytesConfig
 )
 
-from ice import ICEEvaluator, ICEConfig, get_extractor
-from data import get_eraser_dataset
+from ice import get_extractor
 
 
 def parse_args():
@@ -418,7 +416,6 @@ def main():
     
     # Determine if we need eager attention (for llm_attention extractor)
     needs_eager_attention = "llm_attention" in args.extractors
-    skip_attention_extractor = False
     
     # Load model - try bfloat16 first (more stable), then float16, then float32
     model = None
@@ -477,18 +474,17 @@ def main():
                 with torch.no_grad():
                     outputs = test_model(**test_input)
                     if torch.isnan(outputs.logits).any():
-                        print(f"NaN detected, trying next...")
+                        print("NaN detected, trying next...")
                         del test_model
                         torch.cuda.empty_cache()
                         continue
                 
-                print(f"✓ Works!")
+                print("✓ Works!")
                 model = test_model
                 tokenizer = test_tokenizer
                 
                 # If we loaded without eager but needed it, skip attention extractor
                 if needs_eager_attention and not use_eager:
-                    skip_attention_extractor = True
                     print("⚠ Loaded without eager attention - llm_attention will be skipped")
                     args.extractors = [e for e in args.extractors if e != "llm_attention"]
                 break
@@ -527,11 +523,11 @@ def main():
         ds_kwargs["revision"] = args.dataset_revision
     
     if args.dataset == "sst2":
-        dataset = load_dataset("glue", "sst2", split="validation", **ds_kwargs)
+        dataset = load_dataset("nyu-mll/glue", "sst2", split="validation", **ds_kwargs)
         texts = [ex["sentence"] for ex in dataset]
         labels = [ex["label"] for ex in dataset]
     elif args.dataset == "imdb":
-        dataset = load_dataset("imdb", split="test", **ds_kwargs)
+        dataset = load_dataset("stanfordnlp/imdb", split="test", **ds_kwargs)
         texts = [ex["text"][:500] for ex in dataset]  # Truncate long reviews
         labels = [ex["label"] for ex in dataset]
     elif args.dataset == "esnli":
@@ -539,13 +535,13 @@ def main():
         dataset = dataset.filter(lambda x: x["label"] != -1)
         texts = [f"{ex['premise']} [SEP] {ex['hypothesis']}" for ex in dataset]
         labels = [ex["label"] for ex in dataset]
-    
+
     # AG News (Topic Classification)
     elif args.dataset == "agnews":
-        dataset = load_dataset("ag_news", split="test", **ds_kwargs)
+        dataset = load_dataset("fancyzhx/ag_news", split="test", **ds_kwargs)
         texts = [ex["text"][:400] for ex in dataset]  # Truncate
         labels = [ex["label"] for ex in dataset]  # 0=World, 1=Sports, 2=Business, 3=Tech
-        print(f"  Task: Topic Classification (4-class)")
+        print("  Task: Topic Classification (4-class)")
     
     # === MULTILINGUAL DATASETS ===
     
@@ -561,11 +557,13 @@ def main():
             labels = [0 if l == 0 else 1 for _, l in filtered]
         except Exception as e:
             print(f"Error loading Chinese dataset: {e}")
-            print("Trying alternative: c-s-ale/amazon_reviews_multi_zh...")
-            dataset = load_dataset("amazon_reviews_multi", "zh", split="test")
-            texts = [ex["review_body"][:500] for ex in dataset]
-            labels = [1 if ex["stars"] >= 4 else 0 for ex in dataset]  # Binary sentiment
-        print(f"  Language: Chinese (中文)")
+            print("Trying alternative: lansinuote/ChnSentiCorp...")
+            # amazon_reviews_multi was removed from the Hub; use the parquet
+            # ChnSentiCorp mirror instead (0=negative, 1=positive)
+            dataset = load_dataset("lansinuote/ChnSentiCorp", split="test")
+            texts = [ex["text"][:500] for ex in dataset]
+            labels = [ex["label"] for ex in dataset]
+        print("  Language: Chinese (中文)")
     
     # German sentiment (using amazon reviews as GermEval may need special handling)
     elif args.dataset == "german":
@@ -577,12 +575,13 @@ def main():
             filtered = [(t, l) for t, l in zip(texts, labels) if l != 1]
             texts = [t for t, _ in filtered]
             labels = [0 if l == 0 else 1 for _, l in filtered]
-        except:
-            # Fallback to smaller dataset
+        except Exception as e:
+            print(f"Error loading German dataset: {e}")
+            print("Trying alternative: SetFit/amazon_reviews_multi_de...")
             dataset = load_dataset("SetFit/amazon_reviews_multi_de", split="test")
             texts = [ex["text"][:500] for ex in dataset]
             labels = [1 if ex["label"] >= 3 else 0 for ex in dataset]
-        print(f"  Language: German (Deutsch)")
+        print("  Language: German (Deutsch)")
     
     # French sentiment (Allocine movie reviews)
     elif args.dataset == "french":
@@ -594,11 +593,13 @@ def main():
             filtered = [(t, l) for t, l in zip(texts, labels) if l != 1]
             texts = [t for t, _ in filtered]
             labels = [0 if l == 0 else 1 for _, l in filtered]
-        except:
-            dataset = load_dataset("allocine", split="test")
+        except Exception as e:
+            print(f"Error loading French dataset: {e}")
+            print("Trying alternative: tblard/allocine...")
+            dataset = load_dataset("tblard/allocine", split="test")
             texts = [ex["review"][:500] for ex in dataset]
             labels = [ex["label"] for ex in dataset]
-        print(f"  Language: French (Français)")
+        print("  Language: French (Français)")
     
     # Hindi sentiment
     elif args.dataset == "hindi":
@@ -616,7 +617,7 @@ def main():
             # Fallback - you may need a different dataset
             texts = []
             labels = []
-        print(f"  Language: Hindi (हिन्दी)")
+        print("  Language: Hindi (हिन्दी)")
     
     # Limit examples
     if args.max_examples:

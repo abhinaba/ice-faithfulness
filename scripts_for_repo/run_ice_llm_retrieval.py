@@ -34,7 +34,7 @@ from tqdm import tqdm
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 # Import retrieval operator
-from ice.retrieval_operator import RetrievalPool, RetrievalInfillOperator
+from ice.retrieval_operator import RetrievalPool
 
 
 def parse_args():
@@ -184,12 +184,7 @@ def evaluate_with_retrieval(
     valid_importance = [(i, importance[i].item()) for i in valid_positions]
     valid_importance.sort(key=lambda x: x[1], reverse=True)
     top_k_indices = set([idx for idx, _ in valid_importance[:n_tokens]])
-    
-    # Create rationale mask
-    rationale_mask = torch.zeros_like(input_ids)
-    for idx in top_k_indices:
-        rationale_mask[idx] = 1
-    
+
     # Helper to get score
     def get_score(ids, mask):
         with torch.no_grad():
@@ -288,11 +283,11 @@ def main():
     from datasets import load_dataset
     
     if args.dataset == "sst2":
-        dataset = load_dataset("glue", "sst2", split="validation")
+        dataset = load_dataset("nyu-mll/glue", "sst2", split="validation")
         texts = [ex["sentence"] for ex in dataset]
         labels = [ex["label"] for ex in dataset]
     elif args.dataset == "imdb":
-        dataset = load_dataset("imdb", split="test")
+        dataset = load_dataset("stanfordnlp/imdb", split="test")
         texts = [ex["text"][:500] for ex in dataset]
         labels = [ex["label"] for ex in dataset]
     elif args.dataset == "esnli":
@@ -303,7 +298,7 @@ def main():
         texts = [f"{ex['premise']} [SEP] {ex['hypothesis']}" for ex in dataset]
         labels = [ex["label"] for ex in dataset]
     elif args.dataset == "agnews":
-        dataset = load_dataset("ag_news", split="test")
+        dataset = load_dataset("fancyzhx/ag_news", split="test")
         texts = [ex["text"] for ex in dataset]
         labels = [ex["label"] for ex in dataset]
     
@@ -400,7 +395,7 @@ def main():
                     if result is not None:
                         operator_results[op_name].append(result)
             
-            except Exception as e:
+            except Exception:
                 continue
         
         # Aggregate results per operator

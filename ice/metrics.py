@@ -10,9 +10,9 @@ Implements:
 import torch
 import torch.nn.functional as F
 import numpy as np
-from typing import Dict, List, Tuple, Optional, Callable
+from typing import Dict, List, Optional
 from dataclasses import dataclass
-from .operators import BaseOperator, InterventionResult
+from .operators import BaseOperator
 
 
 @dataclass
@@ -153,7 +153,21 @@ class ICEScorer:
             encoded = self.tokenizer("", return_tensors="pt", padding=True)
             baseline_ids = encoded['input_ids']
             baseline_mask = encoded['attention_mask']
-        
+
+        # Guard: causal-LM tokenizers encode "" to an empty sequence, which
+        # would crash the model forward pass. Fall back to a single token.
+        if baseline_ids.numel() == 0:
+            fallback_id = None
+            for attr in ['bos_token_id', 'eos_token_id', 'pad_token_id', 'unk_token_id']:
+                token_id = getattr(self.tokenizer, attr, None)
+                if token_id is not None:
+                    fallback_id = token_id
+                    break
+            if fallback_id is None:
+                fallback_id = 0
+            baseline_ids = torch.tensor([[fallback_id]])
+            baseline_mask = torch.ones_like(baseline_ids)
+
         score = self.get_model_score(baseline_ids, baseline_mask, target_class)
         self._baseline_cache[cache_key] = score
         return score

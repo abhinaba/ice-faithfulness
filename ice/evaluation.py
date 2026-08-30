@@ -6,17 +6,14 @@ Main module that orchestrates ICE faithfulness evaluation.
 
 import torch
 import numpy as np
-import pandas as pd
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional
 from dataclasses import dataclass, field
 from tqdm import tqdm
-import json
-from pathlib import Path
 
-from .operators import BaseOperator, create_ice_lite_operators, create_default_operators
+from .operators import create_ice_lite_operators, create_default_operators
 from .metrics import ICEScorer, compute_auc_over_k, aggregate_across_operators
 from .stats import ICEStatisticalEvaluator, bootstrap_ci, benjamini_hochberg
-from .extractors import BaseRationaleExtractor, get_extractor
+from .extractors import get_extractor
 
 
 @dataclass
@@ -433,8 +430,11 @@ class ICEEvaluator:
         Returns:
             ICEResult with all statistics
         """
+        if extractor is None:
+            extractor = "attention"
         if isinstance(extractor, str):
-            extractor = get_extractor(extractor, self.model, self.tokenizer)
+            extractor = get_extractor(extractor, self.model, self.tokenizer,
+                                      device=self.config.device)
         example_results = []
         auc_suf_scores = []
         auc_comp_scores = []

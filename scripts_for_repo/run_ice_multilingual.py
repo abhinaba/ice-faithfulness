@@ -35,13 +35,16 @@ from datasets import load_dataset
 LANGUAGES = ["french", "german", "hindi", "chinese", "turkish", "arabic",
              "de_native", "fr_native", "hi_native", "cn_native", "tr_native", "ar_native"]
 
-# Dataset revisions for reproducibility
+# Dataset revisions for reproducibility (full 40-char commit SHAs, verified
+# against the HuggingFace Hub API)
 DATASET_REVISIONS = {
-    "multilingual-sentiments": "a3080a58e5631380b388dc572d",  # tyqiangz/multilingual-sentiments
+    "multilingual-sentiments": "a3080a58e563138e9c7a61765d8120b388dc572d",  # tyqiangz/multilingual-sentiments
     "germeval2017": "99da66e994364c565ff980960c83fc9039f81266",  # uhhlt/GermEval2017
-    "allocine": "a4654f4896408912913a62ace89614879a549287",  # allocine
-    "chnsenticorp": "b0c4c119c3fb33b8e735969202ef9ad13d7177e5a",  # lansinuote/ChnSentiCorp (parquet version)
-    "indicsentiment": "dc8f3f66886531c6897fedffcae938a68fc5013",  # ai4bharat/IndicSentiment
+    "allocine": "a4654f4896408912913a62ace89614879a549287",  # tblard/allocine
+    "chnsenticorp": "b0c4c119c3fb33b8e735969202ef9ad13d717e5a",  # lansinuote/ChnSentiCorp (parquet version)
+    "indicsentiment": "dc8f3f66886531c6897fedffca1e938a68fc5013",  # ai4bharat/IndicSentiment
+    "turkish_movie_sentiment": "8ef5ce93ff2504de7fc46776317b78bdd8db47f2",  # mteb/turkish_movie_sentiment
+    "astd": "f6bf20cf5195fd2ee179e79f9838e299caafbad2",  # arbml/ASTD
 }
 
 # Native language datasets (non-translated, native text)
@@ -54,7 +57,9 @@ NATIVE_DATASETS = {
         "revision_key": "germeval2017",
     },
     "fr_native": {
-        "name": "allocine",
+        # Canonical "allocine" was moved into the tblard namespace on the Hub;
+        # the pinned SHA matches the original canonical repo history.
+        "name": "tblard/allocine",
         "split": "test",
         "text_field": "review",
         "label_field": "label",
@@ -76,19 +81,28 @@ NATIVE_DATASETS = {
         "revision_key": "indicsentiment",
     },
     "tr_native": {
-        # Turkish sentiment (movie/product reviews, native Turkish text)
-        "name": "demirtas/turkish-sentiment",
-        "split": "train",
+        # Turkish Movie Reviews Dataset (Demirtas & Pechenizkiy, 2013),
+        # scraped from beyazperde.com. Mirrored on HuggingFace by the MTEB
+        # project (TurkishMovieSentimentClassification task). Binary labels:
+        # 0 = negative, 1 = positive.
+        "name": "mteb/turkish_movie_sentiment",
+        "split": "test",
         "text_field": "text",
         "label_field": "label",
+        "revision_key": "turkish_movie_sentiment",
     },
     "ar_native": {
         # ASTD: Arabic Sentiment Tweets Dataset (Nabil et al., EMNLP 2015)
         # https://aclanthology.org/D15-1299/
-        "name": "nabil/astd",
-        "split": "train",
-        "text_field": "text",
+        # Mirrored on HuggingFace by the arbml (Arabic ML) community.
+        # ClassLabel: 0=Neutral, 1=Objective, 2=Positive, 3=Negative.
+        # label_map binarizes to 1=positive, 0=negative; other classes are skipped.
+        "name": "arbml/ASTD",
+        "split": "train",  # only split published in the mirror
+        "text_field": "tweet",
         "label_field": "label",
+        "revision_key": "astd",
+        "label_map": {2: 1, 3: 0},
     },
 }
 
@@ -195,43 +209,6 @@ def parse_args():
     return parser.parse_args()
 
 
-def load_germeval_dataset(max_examples: int = 100, dataset_revision: str = None):
-    """Load GermEval 2017 dataset for native German sentiment.
-    
-    GermEval 2017 has sentiment labels: 'positive', 'negative', 'neutral'
-    We filter to binary (positive/negative only).
-    """
-    try:
-        ds_kwargs = {"split": "test_syn"}  # Use synchronic test set
-        if dataset_revision:
-            ds_kwargs["revision"] = dataset_revision
-        else:
-            ds_kwargs["revision"] = DATASET_REVISIONS["germeval2017"]
-        
-        ds = load_dataset("uhhlt/GermEval2017", **ds_kwargs)
-        
-        # Map sentiment labels: positive=1, negative=0, skip neutral
-        sentiment_map = {"positive": 1, "negative": 0}
-        filtered = []
-        for ex in ds:
-            sentiment = ex.get("Sentiment", "").lower()
-            if sentiment in sentiment_map:
-                text = ex.get("Text", "")[:400]
-                if text:
-                    filtered.append((text, sentiment_map[sentiment]))
-        
-        texts = [t for t, _ in filtered][:max_examples]
-        labels = [l for _, l in filtered][:max_examples]
-        
-        print(f"Loaded {len(texts)} GermEval examples (native German)")
-        return texts, labels
-    except Exception as e:
-        print(f"Failed to load GermEval: {e}")
-        import traceback
-        traceback.print_exc()
-        return [], []
-
-
 def load_multilingual_dataset(lang: str, max_examples: int = 100, dataset_revision: str = None):
     """Load dataset for specified language."""
     # Handle native datasets (use NATIVE_DATASETS config)
@@ -299,18 +276,19 @@ def load_native_dataset(lang: str, max_examples: int = 100, dataset_revision: st
                 label = ex.get(label_field)
                 
                 # Robust checking (handle string or int)
-                try:
-                    l_str = str(label).strip()
-                    if l_str in ["2", "positive", "Positive"]:  # Positive
-                        filtered.append((text, 1))
-                    elif l_str in ["0", "negative", "Negative"]: # Negative
-                        filtered.append((text, 0))
-                except:
-                    pass
+                if not text:
+                    continue
+                l_str = str(label).strip()
+                if l_str in ["2", "positive", "Positive"]:  # Positive
+                    filtered.append((text, 1))
+                elif l_str in ["0", "negative", "Negative"]:  # Negative
+                    filtered.append((text, 0))
         else:
-            # Other datasets: numeric labels (0=negative, 1=positive) or
-            # string labels (e.g. ASTD uses POS/NEG/NEUTRAL/OBJ) — normalize
-            # to binary and skip neutral/objective examples.
+            # Other datasets: numeric labels (0=negative, 1=positive), an
+            # explicit integer "label_map" in the config (e.g. ASTD:
+            # 2=Positive->1, 3=Negative->0, skip Neutral/Objective), or
+            # string labels — normalize everything to binary.
+            int_label_map = config.get("label_map")
             str_label_map = {
                 "0": 0, "1": 1,
                 "neg": 0, "negative": 0,
@@ -322,6 +300,8 @@ def load_native_dataset(lang: str, max_examples: int = 100, dataset_revision: st
                 label = ex.get(label_field)
                 if isinstance(label, str):
                     label = str_label_map.get(label.strip().lower())
+                elif int_label_map is not None:
+                    label = int_label_map.get(label)
                 if text and label in [0, 1]:
                     filtered.append((text, label))
         
@@ -450,6 +430,12 @@ def evaluate_example_attention(model, tokenizer, text, lang, k, n_permutations, 
         return None
     
     # Get importance from attention (average across ALL layers and heads, last token query)
+    if not outputs.attentions:
+        raise RuntimeError(
+            "Model returned no attention weights (SDPA/flash attention). "
+            "Run with --extractor attention so the model is loaded with "
+            "attn_implementation='eager'."
+        )
     all_layers = torch.stack(outputs.attentions)  # [n_layers, batch, heads, seq, seq]
     attn_weights = all_layers[:, 0, :, -1, :].mean(dim=0).mean(dim=0)  # avg layers, avg heads
     importance = attn_weights.cpu()
@@ -491,17 +477,37 @@ def evaluate_example_attention(model, tokenizer, text, lang, k, n_permutations, 
     return {"win_rate": win_rate, "effect_size": effect_size}
 
 
-def build_corpus_pool(tokenizer, texts, max_texts: int = 500):
-    """Build a flat pool of corpus token IDs for retrieval infill.
+def get_label_blacklist_ids(tokenizer, lang):
+    """Token IDs of label-indicative words to exclude from the retrieval pool.
 
-    Tokens are drawn from the raw dataset texts (not the prompt template),
-    excluding tokenizer special tokens.
+    Tokenizes every label string for the language (raw, stripped, lowercase,
+    and with a leading space) so replacements can never leak the label.
+    """
+    blacklist = set()
+    for label_str in LABELS[lang].values():
+        stripped = label_str.strip()
+        for variant in {label_str, stripped, stripped.lower(),
+                        f" {stripped}", f" {stripped.lower()}"}:
+            blacklist.update(tokenizer.encode(variant, add_special_tokens=False))
+    return blacklist
+
+
+def build_corpus_pool(tokenizer, texts, lang, max_texts: int = 500):
+    """Build a retrieval pool of (token_id, example_id) tuples.
+
+    Matches the paper's leave-one-out protocol: tokens are tagged with the
+    index of the example they came from so that, when infilling example N,
+    no token from example N itself is sampled. Tokens are drawn from the raw
+    dataset texts (not the prompt template), excluding tokenizer special
+    tokens and label-indicative tokens (e.g. "positif"/"negatif").
     """
     special_ids = set(tokenizer.all_special_ids)
+    label_ids = get_label_blacklist_ids(tokenizer, lang)
+    excluded = special_ids | label_ids
     pool = []
-    for text in texts[:max_texts]:
+    for ex_id, text in enumerate(texts[:max_texts]):
         ids = tokenizer.encode(text, add_special_tokens=False)
-        pool.extend(tid for tid in ids if tid not in special_ids)
+        pool.extend((tid, ex_id) for tid in ids if tid not in excluded)
     return pool
 
 
@@ -521,19 +527,34 @@ def _get_importance(model, tokenizer, input_ids, attention_mask, label_token_ids
         with torch.no_grad():
             outputs = model(input_ids=input_ids, attention_mask=attention_mask,
                             output_attentions=True)
+        if not outputs.attentions:
+            raise RuntimeError(
+                "Model returned no attention weights (SDPA/flash attention). "
+                "Run with --extractor attention so the model is loaded with "
+                "attn_implementation='eager'."
+            )
         all_layers = torch.stack([a.cpu() for a in outputs.attentions])
         return all_layers[:, 0, :, -1, :].mean(dim=0).mean(dim=0)
 
 
 def evaluate_example_retrieval(model, tokenizer, text, lang, k, n_permutations,
-                               device, extractor, corpus_pool):
-    """Retrieval-infill sufficiency evaluation.
+                               device, extractor, corpus_pool, example_idx):
+    """Retrieval-infill sufficiency evaluation with leave-one-out sampling.
 
     Keeps the top-k rationale tokens in place and replaces all other tokens
     with random corpus tokens (in-distribution intervention), then compares
     against random rationales of the same size under the same intervention.
+    Replacement tokens are sampled from OTHER examples only (leave-one-out),
+    matching the paper's retrieval protocol.
     """
     if not corpus_pool:
+        return None
+
+    # Leave-one-out: exclude tokens that came from this example
+    local_pool = np.array(
+        [tid for tid, eid in corpus_pool if eid != example_idx], dtype=np.int64
+    )
+    if local_pool.size == 0:
         return None
 
     prompt = PROMPTS[lang].format(text=text)
@@ -562,11 +583,11 @@ def evaluate_example_retrieval(model, tokenizer, text, lang, k, n_permutations,
                        key=lambda i: importance[i], reverse=True)[:n_tokens])
 
     def score_with_kept(kept_positions):
-        """Keep positions as-is, replace the rest with random corpus tokens."""
+        """Keep positions as-is, replace the rest with leave-one-out corpus tokens."""
         new_ids = input_ids.clone()
         replace_pos = [p for p in valid_pos if p not in kept_positions]
         if replace_pos:
-            replacements = np.random.choice(corpus_pool, size=len(replace_pos))
+            replacements = np.random.choice(local_pool, size=len(replace_pos))
             for pos, tok in zip(replace_pos, replacements):
                 new_ids[0, pos] = int(tok)
         with torch.no_grad():
@@ -591,9 +612,14 @@ def evaluate_example_retrieval(model, tokenizer, text, lang, k, n_permutations,
 
 def run_language_on_gpu(gpu_id: int, model_name: str, lang: str, extractor: str,
                         max_examples: int, k: float, n_permutations: int,
-                        results_queue, operators: str = "deletion"):
+                        results_queue, operators: str = "deletion",
+                        seed: int = 42, dataset_revision: str = None):
     """Run evaluation for a single language on a specific GPU."""
     try:
+        # Spawned subprocesses do not inherit the parent's RNG state
+        torch.manual_seed(seed)
+        np.random.seed(seed)
+
         device = f"cuda:{gpu_id}"
         torch.cuda.set_device(gpu_id)
         
@@ -623,43 +649,43 @@ def run_language_on_gpu(gpu_id: int, model_name: str, lang: str, extractor: str,
         model.eval()
         
         # Load dataset
-        texts, labels = load_multilingual_dataset(lang, max_examples)
+        texts, labels = load_multilingual_dataset(lang, max_examples, dataset_revision)
         if not texts:
             print(f"[GPU {gpu_id}] No data for {lang}")
             results_queue.put((lang, {"error": "no_data"}))
             return
-        
+
         print(f"[GPU {gpu_id}] Evaluating {len(texts)} examples for {lang}...")
 
         evaluate_fn = evaluate_example_gradient if extractor == "gradient" else evaluate_example_attention
 
-        # Corpus pool for retrieval infill (only when running both operators)
-        corpus_pool = build_corpus_pool(tokenizer, texts) if operators == "both" else None
+        # Leave-one-out corpus pool for retrieval infill (only when running both operators)
+        corpus_pool = build_corpus_pool(tokenizer, texts, lang) if operators == "both" else None
 
         win_rates = []
         effect_sizes = []
         ret_win_rates = []
         ret_effect_sizes = []
 
-        for text, label in tqdm(zip(texts, labels), total=len(texts), desc=f"GPU{gpu_id}:{lang}"):
+        for ex_idx, (text, label) in enumerate(tqdm(zip(texts, labels), total=len(texts), desc=f"GPU{gpu_id}:{lang}")):
             try:
                 result = evaluate_fn(model, tokenizer, text, lang, k, n_permutations, device)
                 if result:
                     win_rates.append(result["win_rate"])
                     effect_sizes.append(result["effect_size"])
-            except Exception as e:
+            except Exception:
                 continue
 
             if operators == "both":
                 try:
                     ret_result = evaluate_example_retrieval(
                         model, tokenizer, text, lang, k, n_permutations,
-                        device, extractor, corpus_pool
+                        device, extractor, corpus_pool, ex_idx
                     )
                     if ret_result:
                         ret_win_rates.append(ret_result["win_rate"])
                         ret_effect_sizes.append(ret_result["effect_size"])
-                except Exception as e:
+                except Exception:
                     continue
 
         if win_rates:
@@ -695,7 +721,7 @@ def run_language_on_gpu(gpu_id: int, model_name: str, lang: str, extractor: str,
 
 def run_dual_gpu(args):
     """Run evaluation on dual GPUs in parallel."""
-    print(f"\n=== DUAL GPU MODE ===")
+    print("\n=== DUAL GPU MODE ===")
     print(f"Using GPUs: {args.gpu_ids}")
     
     mp.set_start_method('spawn', force=True)
@@ -714,7 +740,7 @@ def run_dual_gpu(args):
                 target=run_language_on_gpu,
                 args=(args.gpu_ids[0], args.model, lang0, args.extractor,
                       args.max_examples, args.k, args.n_permutations, results_queue,
-                      args.operators)
+                      args.operators, args.seed, args.dataset_revision)
             )
             processes.append(p0)
         
@@ -725,7 +751,7 @@ def run_dual_gpu(args):
                 target=run_language_on_gpu,
                 args=(args.gpu_ids[1], args.model, lang1, args.extractor,
                       args.max_examples, args.k, args.n_permutations, results_queue,
-                      args.operators)
+                      args.operators, args.seed, args.dataset_revision)
             )
             processes.append(p1)
         
@@ -745,8 +771,6 @@ def run_dual_gpu(args):
 
 def run_single_gpu(args):
     """Run evaluation on single GPU sequentially."""
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    
     # Load model
     print(f"\nLoading model: {args.model}...")
     
@@ -755,15 +779,13 @@ def run_single_gpu(args):
         "trust_remote_code": True,
     }
     
-    # Model parallelism: spread model across multiple GPUs
+    # Model parallelism: spread model across multiple GPUs.
+    # (CUDA_VISIBLE_DEVICES is set in main() BEFORE any CUDA initialization,
+    # since setting it after torch.cuda has been touched has no effect.)
     if args.model_parallel:
-        print(f"=== MODEL PARALLEL MODE ===")
+        print("=== MODEL PARALLEL MODE ===")
         print(f"Spreading model across GPUs: {args.gpu_ids}")
-        # Set visible GPUs and use auto device mapping
-        os.environ["CUDA_VISIBLE_DEVICES"] = ",".join(map(str, args.gpu_ids))
-        model_kwargs["device_map"] = "auto"
-    else:
-        model_kwargs["device_map"] = "auto"
+    model_kwargs["device_map"] = "auto"
     
     if args.extractor == "attention":
         model_kwargs["attn_implementation"] = "eager"
@@ -789,43 +811,43 @@ def run_single_gpu(args):
         print(f"Evaluating: {lang.upper()}")
         print(f"{'='*40}")
         
-        texts, labels = load_multilingual_dataset(lang, args.max_examples)
+        texts, labels = load_multilingual_dataset(lang, args.max_examples, args.dataset_revision)
         if not texts:
             print(f"No data for {lang}, skipping...")
             all_results[lang] = {"error": "no_data"}
             continue
-        
+
         print(f"Loaded {len(texts)} examples")
 
         evaluate_fn = evaluate_example_gradient if args.extractor == "gradient" else evaluate_example_attention
 
-        # Corpus pool for retrieval infill (only when running both operators)
-        corpus_pool = build_corpus_pool(tokenizer, texts) if args.operators == "both" else None
+        # Leave-one-out corpus pool for retrieval infill (only when running both operators)
+        corpus_pool = build_corpus_pool(tokenizer, texts, lang) if args.operators == "both" else None
 
         win_rates = []
         effect_sizes = []
         ret_win_rates = []
         ret_effect_sizes = []
 
-        for text, label in tqdm(zip(texts, labels), total=len(texts), desc=lang):
+        for ex_idx, (text, label) in enumerate(tqdm(zip(texts, labels), total=len(texts), desc=lang)):
             try:
                 result = evaluate_fn(model, tokenizer, text, lang, args.k, args.n_permutations, model_device)
                 if result:
                     win_rates.append(result["win_rate"])
                     effect_sizes.append(result["effect_size"])
-            except Exception as e:
+            except Exception:
                 continue
 
             if args.operators == "both":
                 try:
                     ret_result = evaluate_example_retrieval(
                         model, tokenizer, text, lang, args.k, args.n_permutations,
-                        model_device, args.extractor, corpus_pool
+                        model_device, args.extractor, corpus_pool, ex_idx
                     )
                     if ret_result:
                         ret_win_rates.append(ret_result["win_rate"])
                         ret_effect_sizes.append(ret_result["effect_size"])
-                except Exception as e:
+                except Exception:
                     continue
 
         if win_rates:
@@ -855,7 +877,11 @@ def run_single_gpu(args):
 
 def main():
     args = parse_args()
-    
+
+    # Must happen before any torch.cuda call to take effect
+    if args.model_parallel and not args.dual_gpu:
+        os.environ["CUDA_VISIBLE_DEVICES"] = ",".join(map(str, args.gpu_ids))
+
     torch.manual_seed(args.seed)
     np.random.seed(args.seed)
     
@@ -905,8 +931,8 @@ def main():
     print("SUMMARY")
     print(f"{'='*80}")
     
-    print(f"\n| Language | Operator  | Win Rate | Effect Size |")
-    print(f"|----------|-----------|----------|-------------|")
+    print("\n| Language | Operator  | Win Rate | Effect Size |")
+    print("|----------|-----------|----------|-------------|")
     for lang in args.languages:
         r = all_results.get(lang, {})
         if "win_rate" in r:

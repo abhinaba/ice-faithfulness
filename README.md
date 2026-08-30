@@ -48,6 +48,25 @@ print(f"Win Rate: {results.win_rate:.1%}")
 print(f"Effect Size (d_null): {results.effect_size:.2f}")
 ```
 
+### Causal LMs: restrict scoring to label tokens
+
+For prompted classification with causal LMs (Llama, Mistral, Qwen, ...), restrict
+prediction and scoring to the task's label tokens via `candidate_token_ids`.
+Without this, argmax runs over the full vocabulary and most examples are
+filtered out by the confidence threshold.
+
+```python
+# For sentiment classification with causal LMs
+pos_id = tokenizer.encode(" positive", add_special_tokens=False)[0]
+neg_id = tokenizer.encode(" negative", add_special_tokens=False)[0]
+
+config = ICEConfig(
+    k_values=[0.2],
+    operators="lite",
+    candidate_token_ids=[neg_id, pos_id],  # restrict to task labels
+)
+```
+
 ## Core Modules
 
 | Module | Purpose |
