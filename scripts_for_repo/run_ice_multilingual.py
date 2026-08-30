@@ -32,9 +32,9 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 from datasets import load_dataset
 
 # Configurations
-LANGUAGES = ["french", "german", "hindi", "chinese", "turkish", "arabic", "de_native", "fr_native", "hi_native", "cn_native"]
+LANGUAGES = ["french", "german", "hindi", "chinese", "turkish", "arabic",
+             "de_native", "fr_native", "hi_native", "cn_native", "tr_native", "ar_native"]
 
-# Dataset revisions for reproducibility
 # Dataset revisions for reproducibility
 DATASET_REVISIONS = {
     "multilingual-sentiments": "a3080a58e5631380b388dc572d",  # tyqiangz/multilingual-sentiments
@@ -74,6 +74,21 @@ NATIVE_DATASETS = {
         "text_field": "INDIC REVIEW",  # Correct capitalization
         "label_field": "LABEL",        # Correct capitalization
         "revision_key": "indicsentiment",
+    },
+    "tr_native": {
+        # Turkish sentiment (movie/product reviews, native Turkish text)
+        "name": "demirtas/turkish-sentiment",
+        "split": "train",
+        "text_field": "text",
+        "label_field": "label",
+    },
+    "ar_native": {
+        # ASTD: Arabic Sentiment Tweets Dataset (Nabil et al., EMNLP 2015)
+        # https://aclanthology.org/D15-1299/
+        "name": "nabil/astd",
+        "split": "train",
+        "text_field": "text",
+        "label_field": "label",
     },
 }
 
@@ -123,7 +138,17 @@ Stimmung:""",
 Metin: {text}
 
 Duygu:""",
+    "tr_native": """Aşağıdaki metnin duygusunu pozitif veya negatif olarak sınıflandırın.
+
+Metin: {text}
+
+Duygu:""",
     "arabic": """صنف مشاعر النص التالي على أنه إيجابي أو سلبي.
+
+النص: {text}
+
+المشاعر:""",
+    "ar_native": """صنف مشاعر النص التالي على أنه إيجابي أو سلبي.
 
 النص: {text}
 
@@ -140,7 +165,9 @@ LABELS = {
     "chinese": {0: "负面", 1: "正面"},
     "cn_native": {0: "负面", 1: "正面"},
     "turkish": {0: " negatif", 1: " pozitif"},
+    "tr_native": {0: " negatif", 1: " pozitif"},
     "arabic": {0: " سلبي", 1: " إيجابي"},
+    "ar_native": {0: " سلبي", 1: " إيجابي"},
 }
 
 
@@ -281,11 +308,20 @@ def load_native_dataset(lang: str, max_examples: int = 100, dataset_revision: st
                 except:
                     pass
         else:
-            # Other datasets have numeric labels (0=negative, 1=positive)
+            # Other datasets: numeric labels (0=negative, 1=positive) or
+            # string labels (e.g. ASTD uses POS/NEG/NEUTRAL/OBJ) — normalize
+            # to binary and skip neutral/objective examples.
+            str_label_map = {
+                "0": 0, "1": 1,
+                "neg": 0, "negative": 0,
+                "pos": 1, "positive": 1,
+            }
             filtered = []
             for ex in ds:
                 text = str(ex.get(text_field, ""))[:400]
                 label = ex.get(label_field)
+                if isinstance(label, str):
+                    label = str_label_map.get(label.strip().lower())
                 if text and label in [0, 1]:
                     filtered.append((text, label))
         
@@ -455,9 +491,107 @@ def evaluate_example_attention(model, tokenizer, text, lang, k, n_permutations, 
     return {"win_rate": win_rate, "effect_size": effect_size}
 
 
+def build_corpus_pool(tokenizer, texts, max_texts: int = 500):
+    """Build a flat pool of corpus token IDs for retrieval infill.
+
+    Tokens are drawn from the raw dataset texts (not the prompt template),
+    excluding tokenizer special tokens.
+    """
+    special_ids = set(tokenizer.all_special_ids)
+    pool = []
+    for text in texts[:max_texts]:
+        ids = tokenizer.encode(text, add_special_tokens=False)
+        pool.extend(tid for tid in ids if tid not in special_ids)
+    return pool
+
+
+def _get_importance(model, tokenizer, input_ids, attention_mask, label_token_ids,
+                    predicted_key, extractor):
+    """Compute per-token importance with the requested extractor."""
+    if extractor == "gradient":
+        with torch.no_grad():
+            embeds = model.get_input_embeddings()(input_ids)
+        embeds = embeds.detach().clone()
+        embeds.requires_grad = True
+        outputs = model(inputs_embeds=embeds, attention_mask=attention_mask)
+        target_token_id = label_token_ids[predicted_key][0]
+        outputs.logits[0, -1, target_token_id].backward()
+        return embeds.grad.abs().sum(dim=-1).squeeze().cpu()
+    else:  # attention
+        with torch.no_grad():
+            outputs = model(input_ids=input_ids, attention_mask=attention_mask,
+                            output_attentions=True)
+        all_layers = torch.stack([a.cpu() for a in outputs.attentions])
+        return all_layers[:, 0, :, -1, :].mean(dim=0).mean(dim=0)
+
+
+def evaluate_example_retrieval(model, tokenizer, text, lang, k, n_permutations,
+                               device, extractor, corpus_pool):
+    """Retrieval-infill sufficiency evaluation.
+
+    Keeps the top-k rationale tokens in place and replaces all other tokens
+    with random corpus tokens (in-distribution intervention), then compares
+    against random rationales of the same size under the same intervention.
+    """
+    if not corpus_pool:
+        return None
+
+    prompt = PROMPTS[lang].format(text=text)
+    label_token_ids = get_label_token_ids(lang, tokenizer)
+
+    inputs = tokenizer(prompt, return_tensors="pt", max_length=512, truncation=True)
+    input_ids = inputs["input_ids"].to(device)
+    attention_mask = inputs["attention_mask"].to(device)
+
+    # Get prediction
+    with torch.no_grad():
+        outputs = model(input_ids=input_ids, attention_mask=attention_mask)
+        logits = outputs.logits[0, -1, :]
+
+    predicted_key, confidence, probs = get_prediction(logits, label_token_ids)
+    if confidence < 0.4:
+        return None
+
+    importance = _get_importance(model, tokenizer, input_ids, attention_mask,
+                                 label_token_ids, predicted_key, extractor)
+
+    seq_len = input_ids.shape[1]
+    valid_pos = list(range(seq_len))
+    n_tokens = max(1, int(k * len(valid_pos)))
+    top_k = set(sorted(range(len(importance)),
+                       key=lambda i: importance[i], reverse=True)[:n_tokens])
+
+    def score_with_kept(kept_positions):
+        """Keep positions as-is, replace the rest with random corpus tokens."""
+        new_ids = input_ids.clone()
+        replace_pos = [p for p in valid_pos if p not in kept_positions]
+        if replace_pos:
+            replacements = np.random.choice(corpus_pool, size=len(replace_pos))
+            for pos, tok in zip(replace_pos, replacements):
+                new_ids[0, pos] = int(tok)
+        with torch.no_grad():
+            out = model(input_ids=new_ids, attention_mask=attention_mask)
+            lg = out.logits[0, -1, :]
+        _, _, p = get_prediction(lg, label_token_ids)
+        return p[predicted_key].item()
+
+    rationale_score = score_with_kept(top_k)
+
+    random_scores = []
+    for _ in range(n_permutations):
+        rand_kept = set(np.random.choice(valid_pos, size=n_tokens, replace=False).tolist())
+        random_scores.append(score_with_kept(rand_kept))
+
+    random_scores = np.array(random_scores)
+    win_rate = np.mean(rationale_score > random_scores)
+    effect_size = (rationale_score - np.mean(random_scores)) / (np.std(random_scores) + 1e-8)
+
+    return {"win_rate": win_rate, "effect_size": effect_size}
+
+
 def run_language_on_gpu(gpu_id: int, model_name: str, lang: str, extractor: str,
-                        max_examples: int, k: float, n_permutations: int, 
-                        results_queue):
+                        max_examples: int, k: float, n_permutations: int,
+                        results_queue, operators: str = "deletion"):
     """Run evaluation for a single language on a specific GPU."""
     try:
         device = f"cuda:{gpu_id}"
@@ -496,12 +630,17 @@ def run_language_on_gpu(gpu_id: int, model_name: str, lang: str, extractor: str,
             return
         
         print(f"[GPU {gpu_id}] Evaluating {len(texts)} examples for {lang}...")
-        
+
         evaluate_fn = evaluate_example_gradient if extractor == "gradient" else evaluate_example_attention
-        
+
+        # Corpus pool for retrieval infill (only when running both operators)
+        corpus_pool = build_corpus_pool(tokenizer, texts) if operators == "both" else None
+
         win_rates = []
         effect_sizes = []
-        
+        ret_win_rates = []
+        ret_effect_sizes = []
+
         for text, label in tqdm(zip(texts, labels), total=len(texts), desc=f"GPU{gpu_id}:{lang}"):
             try:
                 result = evaluate_fn(model, tokenizer, text, lang, k, n_permutations, device)
@@ -510,7 +649,19 @@ def run_language_on_gpu(gpu_id: int, model_name: str, lang: str, extractor: str,
                     effect_sizes.append(result["effect_size"])
             except Exception as e:
                 continue
-        
+
+            if operators == "both":
+                try:
+                    ret_result = evaluate_example_retrieval(
+                        model, tokenizer, text, lang, k, n_permutations,
+                        device, extractor, corpus_pool
+                    )
+                    if ret_result:
+                        ret_win_rates.append(ret_result["win_rate"])
+                        ret_effect_sizes.append(ret_result["effect_size"])
+                except Exception as e:
+                    continue
+
         if win_rates:
             result = {
                 "win_rate": float(np.mean(win_rates)),
@@ -521,6 +672,15 @@ def run_language_on_gpu(gpu_id: int, model_name: str, lang: str, extractor: str,
         else:
             result = {"error": "no_valid_results"}
             print(f"[GPU {gpu_id}] {lang}: No valid results")
+
+        if ret_win_rates:
+            result["retrieval"] = {
+                "win_rate": float(np.mean(ret_win_rates)),
+                "effect_size": float(np.mean(ret_effect_sizes)),
+                "n_examples": len(ret_win_rates),
+            }
+            print(f"[GPU {gpu_id}] {lang}: Retrieval Win Rate = "
+                  f"{result['retrieval']['win_rate']*100:.1f}%")
         
         results_queue.put((lang, result))
         
@@ -553,7 +713,8 @@ def run_dual_gpu(args):
             p0 = mp.Process(
                 target=run_language_on_gpu,
                 args=(args.gpu_ids[0], args.model, lang0, args.extractor,
-                      args.max_examples, args.k, args.n_permutations, results_queue)
+                      args.max_examples, args.k, args.n_permutations, results_queue,
+                      args.operators)
             )
             processes.append(p0)
         
@@ -563,7 +724,8 @@ def run_dual_gpu(args):
             p1 = mp.Process(
                 target=run_language_on_gpu,
                 args=(args.gpu_ids[1], args.model, lang1, args.extractor,
-                      args.max_examples, args.k, args.n_permutations, results_queue)
+                      args.max_examples, args.k, args.n_permutations, results_queue,
+                      args.operators)
             )
             processes.append(p1)
         
@@ -634,12 +796,17 @@ def run_single_gpu(args):
             continue
         
         print(f"Loaded {len(texts)} examples")
-        
+
         evaluate_fn = evaluate_example_gradient if args.extractor == "gradient" else evaluate_example_attention
-        
+
+        # Corpus pool for retrieval infill (only when running both operators)
+        corpus_pool = build_corpus_pool(tokenizer, texts) if args.operators == "both" else None
+
         win_rates = []
         effect_sizes = []
-        
+        ret_win_rates = []
+        ret_effect_sizes = []
+
         for text, label in tqdm(zip(texts, labels), total=len(texts), desc=lang):
             try:
                 result = evaluate_fn(model, tokenizer, text, lang, args.k, args.n_permutations, model_device)
@@ -648,7 +815,19 @@ def run_single_gpu(args):
                     effect_sizes.append(result["effect_size"])
             except Exception as e:
                 continue
-        
+
+            if args.operators == "both":
+                try:
+                    ret_result = evaluate_example_retrieval(
+                        model, tokenizer, text, lang, args.k, args.n_permutations,
+                        model_device, args.extractor, corpus_pool
+                    )
+                    if ret_result:
+                        ret_win_rates.append(ret_result["win_rate"])
+                        ret_effect_sizes.append(ret_result["effect_size"])
+                except Exception as e:
+                    continue
+
         if win_rates:
             all_results[lang] = {
                 "win_rate": float(np.mean(win_rates)),
@@ -661,6 +840,15 @@ def run_single_gpu(args):
         else:
             print(f"No valid results for {lang}")
             all_results[lang] = {"error": "no_valid_results"}
+
+        if ret_win_rates:
+            all_results[lang]["retrieval"] = {
+                "win_rate": float(np.mean(ret_win_rates)),
+                "effect_size": float(np.mean(ret_effect_sizes)),
+                "n_examples": len(ret_win_rates),
+            }
+            print(f"  Retrieval Win Rate: {all_results[lang]['retrieval']['win_rate']*100:.1f}%")
+            print(f"  Retrieval Effect Size: {all_results[lang]['retrieval']['effect_size']:.3f}")
     
     return all_results
 
@@ -677,6 +865,7 @@ def main():
     print(f"Model: {args.model}")
     print(f"Languages: {args.languages}")
     print(f"Extractor: {args.extractor}")
+    print(f"Operators: {args.operators}")
     print(f"Dual GPU: {args.dual_gpu}")
     
     # Run evaluation
@@ -694,6 +883,7 @@ def main():
             "languages": args.languages,
             "dataset_revision": args.dataset_revision,
             "extractor": args.extractor,
+            "operators": args.operators,
             "k": args.k,
             "n_permutations": args.n_permutations,
             "max_examples": args.max_examples,
@@ -715,14 +905,17 @@ def main():
     print("SUMMARY")
     print(f"{'='*80}")
     
-    print(f"\n| Language | Win Rate | Effect Size |")
-    print(f"|----------|----------|-------------|")
+    print(f"\n| Language | Operator  | Win Rate | Effect Size |")
+    print(f"|----------|-----------|----------|-------------|")
     for lang in args.languages:
         r = all_results.get(lang, {})
         if "win_rate" in r:
-            print(f"| {lang:8} | {r['win_rate']*100:6.1f}% | {r['effect_size']:+.3f}      |")
+            print(f"| {lang:8} | deletion  | {r['win_rate']*100:6.1f}% | {r['effect_size']:+.3f}      |")
         else:
-            print(f"| {lang:8} | FAILED   | -           |")
+            print(f"| {lang:8} | deletion  | FAILED   | -           |")
+        if "retrieval" in r:
+            ret = r["retrieval"]
+            print(f"| {lang:8} | retrieval | {ret['win_rate']*100:6.1f}% | {ret['effect_size']:+.3f}      |")
     
     print(f"\nResults saved to: {output_file}")
 

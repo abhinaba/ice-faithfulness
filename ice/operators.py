@@ -230,8 +230,19 @@ class MaskOperator(BaseOperator):
     # In MaskOperator:
     def get_baseline_input(self, tokenizer):
         """Return fully-masked input for this operator family."""
+        # Pick a mask-like token; causal-LM tokenizers have no mask_token
+        mask_str = (
+            getattr(tokenizer, 'mask_token', None)
+            or getattr(tokenizer, 'unk_token', None)
+            or getattr(tokenizer, 'pad_token', None)
+            or getattr(tokenizer, 'eos_token', None)
+        )
+        if mask_str is None:
+            # Last resort: empty input
+            encoded = tokenizer("", return_tensors="pt")
+            return encoded['input_ids'], encoded['attention_mask']
         # Create a short sequence of just mask tokens
-        mask_seq = " ".join([tokenizer.mask_token] * 5)
+        mask_seq = " ".join([mask_str] * 5)
         encoded = tokenizer(mask_seq, return_tensors="pt")
         return encoded['input_ids'], encoded['attention_mask']
 

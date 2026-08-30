@@ -80,21 +80,24 @@ class RetrievalPool:
             rationale_masks: List of rationale masks (1=rationale, 0=context)
         """
         self.token_pool = []
-        
+
+        # Exclude tokenizer special tokens (BOS/EOS/PAD/CLS/SEP/...) from the pool
+        special_ids = set(self.tokenizer.all_special_ids)
+
         for ex_id, (input_ids, rationale_mask) in enumerate(zip(input_ids_list, rationale_masks)):
             # Flatten if needed
             if len(input_ids.shape) > 1:
                 input_ids = input_ids.squeeze()
             if len(rationale_mask.shape) > 1:
                 rationale_mask = rationale_mask.squeeze()
-            
+
             # Extract rationale tokens
             rationale_positions = (rationale_mask == 1).nonzero(as_tuple=True)[0]
-            
+
             for pos in rationale_positions:
                 token_id = input_ids[pos].item()
                 # Skip blacklisted and special tokens
-                if token_id not in self.blacklist_ids:
+                if token_id not in self.blacklist_ids and token_id not in special_ids:
                     self.token_pool.append((token_id, ex_id))
         
         self._built = True
@@ -104,9 +107,16 @@ class RetrievalPool:
         """Sample n tokens, optionally excluding a specific example (leave-one-out)."""
         if not self._built:
             raise RuntimeError("Pool not built")
-        
+
         valid_tokens = [t for t, eid in self.token_pool if eid != exclude_example_id]
-        
+
+        if not valid_tokens:
+            raise RuntimeError(
+                "Retrieval pool has no usable tokens after leave-one-out exclusion "
+                f"(pool size={len(self.token_pool)}, excluded example={exclude_example_id}). "
+                "Build the pool from more than one example."
+            )
+
         if len(valid_tokens) < n:
             # Sample with replacement if not enough
             return list(self.rng.choice(valid_tokens, size=n, replace=True))

@@ -682,7 +682,7 @@ def main():
         print(f"\n{extractor_name} Results:")
         print(f"  Examples: {len(example_results)}")
         print(f"  Win Rate: {mean_win_rate*100:.1f}% (>50% = better than random)")
-        print(f"  Effect Size: {mean_effect_size:.2f} (Cohen's d)")
+        print(f"  Effect Size: {mean_effect_size:.2f} (d_null)")
         print(f"  Significant (p<0.1): {n_significant}/{len(example_results)} ({n_significant/len(example_results)*100:.1f}%)")
         print(f"  Random score std (diagnostic): {mean_random_std:.4f}")
         

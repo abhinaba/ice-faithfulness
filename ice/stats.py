@@ -86,12 +86,15 @@ def randomization_test(
                 continue  # Skip special tokens
             valid_positions.append(i)
     
+    if not valid_positions:
+        raise ValueError(
+            "No valid (non-special, attended) token positions available "
+            "for the randomization test — input may be empty or all-special."
+        )
+
     valid_positions = np.array(valid_positions)
-    
+
     # Generate null distribution
-    null_scores = []
-    
-    
     null_scores = []
     for _ in range(n_permutations):
         if len(valid_positions) >= rationale_length:
@@ -293,7 +296,7 @@ class ICEStatisticalEvaluator:
             comp_score_function,
             n_permutations=self.n_permutations,
             alpha=self.alpha,
-            seed=seed + 1 if seed else None
+            seed=seed + 1 if seed is not None else None
         )
         
         return {

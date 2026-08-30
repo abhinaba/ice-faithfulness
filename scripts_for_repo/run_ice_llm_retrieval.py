@@ -296,7 +296,9 @@ def main():
         texts = [ex["text"][:500] for ex in dataset]
         labels = [ex["label"] for ex in dataset]
     elif args.dataset == "esnli":
-        dataset = load_dataset("esnli", split="test")
+        # Use stanfordnlp/snli: the legacy "esnli" script-based dataset is
+        # unsupported by datasets>=3.0
+        dataset = load_dataset("stanfordnlp/snli", split="test")
         dataset = dataset.filter(lambda x: x["label"] != -1)
         texts = [f"{ex['premise']} [SEP] {ex['hypothesis']}" for ex in dataset]
         labels = [ex["label"] for ex in dataset]

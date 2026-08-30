@@ -34,6 +34,7 @@ class ICEConfig:
     # Evaluation settings
     k_values: List[float] = field(default_factory=lambda: [0.1, 0.2, 0.3, 0.4, 0.5])
     score_type: str = "prob"  # "prob", "logit", or "margin"
+    candidate_token_ids: Optional[List[int]] = None  # restrict prediction to these vocab IDs
     
     # Runtime settings
     batch_size: int = 1
@@ -114,8 +115,14 @@ class ICEResult:
             f"  Mean: {self.comprehensiveness_stats['mean']:.3f} ± {self.comprehensiveness_stats['mean_se']:.3f}",
             f"  95% CI: [{self.comprehensiveness_stats['mean_ci_lower']:.3f}, {self.comprehensiveness_stats['mean_ci_upper']:.3f}]",
             "",
-            f"AUC-Sufficiency: {self.auc_sufficiency.get('mean', 'N/A'):.3f}",
-            f"AUC-Comprehensiveness: {self.auc_comprehensiveness.get('mean', 'N/A'):.3f}",
+            "AUC-Sufficiency: " + (
+                f"{self.auc_sufficiency['mean']:.3f}"
+                if isinstance(self.auc_sufficiency.get('mean'), (int, float)) else "N/A"
+            ),
+            "AUC-Comprehensiveness: " + (
+                f"{self.auc_comprehensiveness['mean']:.3f}"
+                if isinstance(self.auc_comprehensiveness.get('mean'), (int, float)) else "N/A"
+            ),
             "",
             "Faithfulness vs Random:",
             f"  Win Rate: {mean_win_rate*100:.1f}% (>50% = better than random)",
@@ -163,7 +170,8 @@ class ICEEvaluator:
         self.scorer = ICEScorer(
             model, tokenizer,
             score_type=self.config.score_type,
-            device=self.config.device
+            device=self.config.device,
+            candidate_token_ids=self.config.candidate_token_ids
         )
         
         self.stat_evaluator = ICEStatisticalEvaluator(
@@ -257,15 +265,6 @@ class ICEEvaluator:
         suf_agg = aggregate_across_operators(suf_results)
         comp_agg = aggregate_across_operators(comp_results)
         
-        def _compute_auc_statistic(self, input_ids, attention_mask, importance_scores, 
-                            target_class, operator):
-            """Compute AUC as single test statistic."""
-            auc_result = compute_auc_over_k(
-                self.scorer, input_ids, attention_mask, importance_scores,
-                target_class, operator, self.config.k_values, "sufficiency"
-            )
-            return auc_result["auc"]
-            
         # Randomization test for sufficiency
         def suf_score_fn(mask):
             results = []
@@ -325,9 +324,15 @@ class ICEEvaluator:
                 if input_ids[i].item() not in special_token_ids:
                     valid_positions.append(i)
         
+        if not valid_positions:
+            raise ValueError(
+                "No valid (non-special, attended) token positions available "
+                "for the randomization test — input may be empty or all-special."
+            )
+
         valid_positions = np.array(valid_positions)
         null_scores = []
-        
+
         for _ in range(self.config.n_permutations):
             if len(valid_positions) >= rationale_length:
                 random_indices = np.random.choice(
@@ -394,10 +399,9 @@ class ICEEvaluator:
             if mask.dim() == 2:
                 mask = mask.squeeze(0)
             all_ids.append(ids)
-            # Use top-k as rationale mask for pool building
-            n_tokens = max(1, int(k * mask.sum().item()))
-            rmask = torch.zeros_like(mask)
-            rmask[:n_tokens] = 1  # placeholder — pool uses all non-special tokens
+            # Pool draws from ALL attended tokens (special tokens are
+            # excluded inside RetrievalPool.build_pool)
+            rmask = mask.clone()  # use all attended tokens for the pool
             all_masks.append(rmask)
 
         pool = RetrievalPool(self.tokenizer, seed=self.config.seed)
@@ -482,9 +486,19 @@ class ICEEvaluator:
                     seq_lengths = mask.sum(dim=-1) - 1
                     last_pos = seq_lengths[0].long().to(logits.device)
                     logits = logits[0, last_pos, :].unsqueeze(0)
-                probs = torch.softmax(logits, dim=-1)
-                confidence = probs.max().item()
-                target_class = logits.argmax(dim=-1).item()
+                if self.config.candidate_token_ids is not None:
+                    # Restrict prediction to the candidate label-token vocabulary
+                    cand = torch.tensor(
+                        self.config.candidate_token_ids, device=logits.device
+                    )
+                    cand_logits = logits[0, cand]
+                    probs = torch.softmax(cand_logits, dim=-1)
+                    confidence = probs.max().item()
+                    target_class = int(cand[cand_logits.argmax()].item())
+                else:
+                    probs = torch.softmax(logits, dim=-1)
+                    confidence = probs.max().item()
+                    target_class = logits.argmax(dim=-1).item()
             
             # Skip low-confidence examples where NSD is unstable
             if confidence < 0.5:
@@ -514,6 +528,13 @@ class ICEEvaluator:
                 auc_suf_scores.append(auc_suf["auc"])
                 auc_comp_scores.append(auc_comp["auc"])
         
+        if not example_results:
+            raise RuntimeError(
+                "No examples passed the confidence filter (>= 0.5); nothing to "
+                "aggregate. Use more examples, a stronger model, or set "
+                "candidate_token_ids so predictions are restricted to label tokens."
+            )
+
         # Aggregate dataset statistics
         suf_stats = self.stat_evaluator.evaluate_dataset(
             example_results, "sufficiency_nsd"

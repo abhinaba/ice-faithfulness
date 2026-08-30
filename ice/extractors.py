@@ -209,10 +209,14 @@ class GradientExtractor(BaseRationaleExtractor):
                 "Use attention-based extraction instead."
             )
         
+        # Handle causal LMs: logits are [batch, seq, vocab] — use last position
+        if logits.dim() == 3:
+            logits = logits[:, -1, :]
+
         # Determine target
         if target_class is None:
             target_class = logits.argmax(dim=-1).item()
-        
+
         # Backward
         logits[0, target_class].backward()
         grads = embeds.grad

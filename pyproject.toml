@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ice-faithfulness"
-version = "1.0.0"
+version = "1.0.1"
 description = "ICE: Intervention-Consistent Explanation Evaluation for LLMs"
 readme = "README.md"
 license = {text = "MIT"}

@@ -59,12 +59,18 @@ class ICEScorer:
         model,
         tokenizer,
         score_type: str = "prob",  # "prob", "logit", or "margin"
-        device: str = "cuda" if torch.cuda.is_available() else "cpu"
+        device: str = "cuda" if torch.cuda.is_available() else "cpu",
+        candidate_token_ids: Optional[List[int]] = None
     ):
         self.model = model
         self.tokenizer = tokenizer
         self.score_type = score_type
         self.device = device
+        # Optional restriction of scoring to a subset of vocab IDs
+        # (e.g. label tokens for prompted causal-LM classification)
+        self.candidate_token_ids = (
+            list(candidate_token_ids) if candidate_token_ids is not None else None
+        )
         self.model.to(device)
         self.model.eval()
         
@@ -102,6 +108,19 @@ class ICEScorer:
             seq_lengths = attention_mask.sum(dim=-1) - 1
             last_pos = seq_lengths[0].long()
             logits = logits[0, last_pos, :].unsqueeze(0)  # [1, vocab]
+
+        # Optionally restrict scoring to candidate label tokens
+        if self.candidate_token_ids is not None:
+            cand = torch.tensor(self.candidate_token_ids, device=logits.device)
+            logits = logits[:, cand]  # [1, n_candidates]
+            if target_class in self.candidate_token_ids:
+                # Map vocab ID -> candidate index
+                target_class = self.candidate_token_ids.index(target_class)
+            elif target_class >= logits.shape[-1]:
+                raise ValueError(
+                    f"target_class {target_class} is neither a candidate vocab ID "
+                    f"({self.candidate_token_ids}) nor a valid candidate index"
+                )
 
         if self.score_type == "prob":
             probs = F.softmax(logits, dim=-1)
@@ -356,7 +375,9 @@ def compute_auc_over_k(
         nsd_values.append(nsd)
     
     # Compute AUC using trapezoidal rule
-    auc = np.trapz(nsd_values, k_values)
+    # (np.trapz was removed in NumPy 2.0 in favor of np.trapezoid)
+    _trapezoid = getattr(np, "trapezoid", getattr(np, "trapz", None))
+    auc = float(_trapezoid(nsd_values, k_values))
     
     return {
         "auc": auc,
