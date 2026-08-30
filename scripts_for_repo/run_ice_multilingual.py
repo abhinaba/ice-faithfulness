@@ -118,6 +118,16 @@ Stimmung:""",
 文本: {text}
 
 情感:""",
+    "turkish": """Aşağıdaki metnin duygusunu pozitif veya negatif olarak sınıflandırın.
+
+Metin: {text}
+
+Duygu:""",
+    "arabic": """صنف مشاعر النص التالي على أنه إيجابي أو سلبي.
+
+النص: {text}
+
+المشاعر:""",
 }
 
 LABELS = {
@@ -129,6 +139,8 @@ LABELS = {
     "hi_native": {0: "नकारात्मक", 1: "सकारात्मक"},
     "chinese": {0: "负面", 1: "正面"},
     "cn_native": {0: "负面", 1: "正面"},
+    "turkish": {0: " negatif", 1: " pozitif"},
+    "arabic": {0: " سلبي", 1: " إيجابي"},
 }
 
 

@@ -274,7 +274,7 @@ class ICEEvaluator:
                     input_ids, attention_mask, mask, target_class, op
                 )
                 results.append(r["sufficiency_nsd"])
-            return np.median(results)
+            return np.mean(results)
         
         suf_test = self._run_randomization_test(
             observed_score=suf_agg.get("sufficiency_nsd_robust", 0),

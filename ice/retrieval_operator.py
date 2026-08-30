@@ -124,7 +124,7 @@ class RetrievalInfillOperator(BaseOperator):
     For ACL paper: Add this alongside deletion and mask operators.
     """
     
-    def __init__(self, tokenizer, pool: RetrievalPool = None, 
+    def __init__(self, tokenizer, pool: RetrievalPool = None,
                  use_sentiment_scrub: bool = False, seed: int = 42):
         super().__init__(tokenizer, "retrieval_infill")
         self.pool = pool
@@ -132,6 +132,21 @@ class RetrievalInfillOperator(BaseOperator):
         self.seed = seed
         self.rng = np.random.default_rng(seed)
         self._current_example_id = -1
+        self._collected_inputs = []
+        self._collected_masks = []
+
+    def _ensure_pool(self, input_ids, attention_mask, rationale_mask):
+        """Auto-build pool from collected examples if not already built."""
+        if self.pool is None:
+            self.pool = RetrievalPool(self.tokenizer, seed=self.seed,
+                                     use_sentiment_scrub=self.use_sentiment_scrub)
+        if not self.pool._built:
+            self._collected_inputs.append(input_ids.clone().cpu())
+            self._collected_masks.append(rationale_mask.clone().cpu())
+            if len(self._collected_inputs) >= 10:
+                self.pool.build_pool(self._collected_inputs, self._collected_masks)
+            else:
+                self.pool.build_pool(self._collected_inputs, self._collected_masks)
     
     def set_pool(self, pool: RetrievalPool):
         self.pool = pool
@@ -152,8 +167,7 @@ class RetrievalInfillOperator(BaseOperator):
         This tests if the rationale is SUFFICIENT by surrounding it
         with in-distribution (but unrelated) tokens.
         """
-        if self.pool is None or not self.pool._built:
-            raise RuntimeError("Pool must be built before use")
+        self._ensure_pool(input_ids, attention_mask, rationale_mask)
         
         device = input_ids.device
         original_length = attention_mask.sum().item()
@@ -201,8 +215,7 @@ class RetrievalInfillOperator(BaseOperator):
         This tests if the rationale is NECESSARY by replacing it
         with in-distribution alternatives.
         """
-        if self.pool is None or not self.pool._built:
-            raise RuntimeError("Pool must be built before use")
+        self._ensure_pool(input_ids, attention_mask, rationale_mask)
         
         device = input_ids.device
         original_length = attention_mask.sum().item()

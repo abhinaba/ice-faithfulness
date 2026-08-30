@@ -21,7 +21,7 @@ class RandomizationTestResult:
     observed_score: float
     null_scores: np.ndarray
     p_value: float
-    effect_size: float  # Cohen's d
+    effect_size: float  # d_null (standardized distance from null)
     is_significant: bool
     alpha: float
     n_permutations: int
@@ -115,7 +115,7 @@ def randomization_test(
     n_greater_equal = np.sum(null_scores >= observed_score)
     p_value = (1 + n_greater_equal) / (n_permutations + 1)
     
-    # Compute effect size (Cohen's d)
+    # Compute effect size (d_null (standardized distance from null))
     null_mean = np.mean(null_scores)
     null_std = np.std(null_scores)
     if null_std > 0:

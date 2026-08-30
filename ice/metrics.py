@@ -94,14 +94,21 @@ class ICEScorer:
         with torch.no_grad():
             outputs = self.model(input_ids=input_ids, attention_mask=attention_mask)
             logits = outputs.logits
-        
+
+        # Handle causal LMs: logits are [batch, seq, vocab]
+        # Use the last non-padded token's logits
+        if logits.dim() == 3:
+            # Find last valid position
+            seq_lengths = attention_mask.sum(dim=-1) - 1
+            last_pos = seq_lengths[0].long()
+            logits = logits[0, last_pos, :].unsqueeze(0)  # [1, vocab]
+
         if self.score_type == "prob":
             probs = F.softmax(logits, dim=-1)
             return probs[0, target_class].item()
         elif self.score_type == "logit":
             return logits[0, target_class].item()
         elif self.score_type == "margin":
-            # Margin between target class and highest other class
             other_max = logits[0].clone()
             other_max[target_class] = float('-inf')
             return (logits[0, target_class] - other_max.max()).item()
