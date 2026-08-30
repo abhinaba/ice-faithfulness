@@ -32,7 +32,7 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 from datasets import load_dataset
 
 # Configurations
-LANGUAGES = ["french", "german", "hindi", "chinese", "de_native", "fr_native", "hi_native", "cn_native"]
+LANGUAGES = ["french", "german", "hindi", "chinese", "turkish", "arabic", "de_native", "fr_native", "hi_native", "cn_native"]
 
 # Dataset revisions for reproducibility
 # Dataset revisions for reproducibility
@@ -315,7 +315,7 @@ def evaluate_example_gradient(model, tokenizer, text, lang, k, n_permutations, d
     prompt = PROMPTS[lang].format(text=text)
     label_token_ids = get_label_token_ids(lang, tokenizer)
     
-    inputs = tokenizer(prompt, return_tensors="pt", max_length=256, truncation=True)
+    inputs = tokenizer(prompt, return_tensors="pt", max_length=512, truncation=True)
     input_ids = inputs["input_ids"].to(device)
     attention_mask = inputs["attention_mask"].to(device)
     
@@ -385,7 +385,7 @@ def evaluate_example_attention(model, tokenizer, text, lang, k, n_permutations, 
     prompt = PROMPTS[lang].format(text=text)
     label_token_ids = get_label_token_ids(lang, tokenizer)
     
-    inputs = tokenizer(prompt, return_tensors="pt", max_length=256, truncation=True)
+    inputs = tokenizer(prompt, return_tensors="pt", max_length=512, truncation=True)
     input_ids = inputs["input_ids"].to(device)
     attention_mask = inputs["attention_mask"].to(device)
     

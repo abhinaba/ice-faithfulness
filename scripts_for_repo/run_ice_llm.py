@@ -281,7 +281,7 @@ def evaluate_llm_example(
     encoded = tokenizer(
         prompt,
         return_tensors="pt",
-        max_length=256,
+        max_length=512,
         truncation=True,
         padding=True
     )

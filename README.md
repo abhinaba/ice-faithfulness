@@ -63,13 +63,13 @@ print(f"Effect Size (d_null): {results.effect_size:.2f}")
 
 ```bash
 # English benchmarks (7 models x 4 tasks)
-python scripts_for_repo/run_ice_llm.py --model llama-3.2-3b --dataset sst2
+python scripts_for_repo/run_ice_llm.py --model meta-llama/Llama-3.2-3B-Instruct --dataset sst2
 
 # Multilingual (6 languages)
-python scripts_for_repo/run_ice_multilingual.py --model qwen-2.5-7b --languages french
+python scripts_for_repo/run_ice_multilingual.py --model Qwen/Qwen2.5-7B-Instruct --languages french german turkish arabic
 
 # Operator comparison
-python scripts_for_repo/run_ice_llm_retrieval.py --model mistral-7b --dataset esnli
+python scripts_for_repo/run_ice_llm_retrieval.py --model mistralai/Mistral-7B-Instruct-v0.3 --dataset esnli
 ```
 
 ## Key Metrics

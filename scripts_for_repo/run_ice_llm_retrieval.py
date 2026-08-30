@@ -321,7 +321,7 @@ def main():
         
         for text in texts:
             prompt = format_classification_prompt(text, args.dataset)
-            encoded = tokenizer(prompt, return_tensors="pt", max_length=256, truncation=True)
+            encoded = tokenizer(prompt, return_tensors="pt", max_length=512, truncation=True)
             input_ids = encoded["input_ids"].squeeze()
             # Use all tokens as potential rationale for pool building
             rationale_mask = torch.ones_like(input_ids)
@@ -354,7 +354,7 @@ def main():
         for example_id, (text, label) in enumerate(tqdm(zip(texts, labels), total=len(texts))):
             try:
                 prompt = format_classification_prompt(text, args.dataset)
-                encoded = tokenizer(prompt, return_tensors="pt", max_length=256, truncation=True)
+                encoded = tokenizer(prompt, return_tensors="pt", max_length=512, truncation=True)
                 
                 input_ids = encoded["input_ids"].to(device).squeeze()
                 attention_mask = encoded["attention_mask"].to(device).squeeze()

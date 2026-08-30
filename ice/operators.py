@@ -276,11 +276,19 @@ def create_default_operators(tokenizer) -> dict:
 def create_ice_lite_operators(tokenizer) -> List[BaseOperator]:
     """
     Create ICE-lite operator set (2 operators for efficiency).
-    
+
     Returns:
-        List of operators: [deletion, mask]
+        List of operators: [deletion, retrieval_infill]
+        Falls back to [deletion, mask] if retrieval operator unavailable.
     """
-    return [
-        DeletionOperator(tokenizer, keep_special_tokens=True),
-        MaskOperator(tokenizer, mask_token="mask")
-    ]
+    try:
+        from .retrieval_operator import RetrievalInfillOperator
+        return [
+            DeletionOperator(tokenizer, keep_special_tokens=True),
+            RetrievalInfillOperator(tokenizer)
+        ]
+    except (ImportError, Exception):
+        return [
+            DeletionOperator(tokenizer, keep_special_tokens=True),
+            MaskOperator(tokenizer, mask_token="mask")
+        ]

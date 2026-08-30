@@ -63,6 +63,18 @@ class ICEResult:
     extractor_name: str
     n_examples: int
     
+    @property
+    def win_rate(self) -> float:
+        """Mean win rate across examples."""
+        wrs = [r.get("win_rate", 0) for r in self.example_results]
+        return float(np.mean(wrs)) if wrs else 0.0
+
+    @property
+    def effect_size(self) -> float:
+        """Mean d_null across examples."""
+        es = [r.get("effect_size", 0) for r in self.example_results]
+        return float(np.mean(es)) if es else 0.0
+
     def to_dict(self) -> Dict:
         """Convert to dictionary for serialization"""
         return {
@@ -107,7 +119,7 @@ class ICEResult:
             "",
             "Faithfulness vs Random:",
             f"  Win Rate: {mean_win_rate*100:.1f}% (>50% = better than random)",
-            f"  Effect Size: {mean_effect_size:.2f} (Cohen's d)",
+            f"  Effect Size: {mean_effect_size:.2f} (d_null)",
         ]
         
         if 'n_significant_fdr' in self.sufficiency_stats:
@@ -343,7 +355,7 @@ class ICEEvaluator:
         n_greater_equal = np.sum(null_scores >= observed_score)
         p_value = (1 + n_greater_equal) / (self.config.n_permutations + 1)
         
-        # Effect size (Cohen's d)
+        # Effect size (d_null)
         null_mean = np.mean(null_scores)
         null_std = np.std(null_scores)
         effect_size = (observed_score - null_mean) / null_std if null_std > 0 else 0
@@ -361,24 +373,28 @@ class ICEEvaluator:
     def evaluate_dataset(
         self,
         dataset,
-        extractor: BaseRationaleExtractor,
+        extractor=None,
         k: float = 0.2,
         max_examples: int = None,
         show_progress: bool = True
     ) -> ICEResult:
         """
         Evaluate an entire dataset.
-        
+
         Args:
             dataset: Iterable of (input_ids, attention_mask, label) tuples or dicts
-            extractor: Rationale extraction method
+            extractor: Rationale extraction method — either a BaseRationaleExtractor
+                       object or a string ("attention", "gradient") that will be
+                       resolved via get_extractor()
             k: Rationale budget
             max_examples: Limit evaluation to this many examples
             show_progress: Show progress bar
-            
+
         Returns:
             ICEResult with all statistics
         """
+        if isinstance(extractor, str):
+            extractor = get_extractor(extractor, self.model, self.tokenizer)
         example_results = []
         auc_suf_scores = []
         auc_comp_scores = []

@@ -18,6 +18,8 @@ dependencies = [
     "scipy>=1.7",
     "torch>=1.10",
     "transformers>=4.20",
+    "pandas",
+    "tqdm",
 ]
 classifiers = [
     "Programming Language :: Python :: 3",

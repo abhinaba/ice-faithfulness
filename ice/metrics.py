@@ -362,14 +362,14 @@ def compute_auc_over_k(
 
 def aggregate_across_operators(
     results_by_operator: List[Dict],
-    aggregation: str = "median"
+    aggregation: str = "mean"
 ) -> Dict[str, float]:
     """
     Aggregate scores across multiple operators for robustness.
-    
+
     Args:
         results_by_operator: List of result dicts from different operators
-        aggregation: "median" or "mean"
+        aggregation: "mean" (default, matches Algorithm 1) or "median"
         
     Returns:
         Aggregated scores
