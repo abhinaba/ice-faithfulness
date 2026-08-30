@@ -325,17 +325,20 @@ def main():
             all_input_ids.append(input_ids)
             all_rationale_masks.append(rationale_mask)
         
+        target_tokens = get_target_tokens(args.dataset, tokenizer)
+        extra_bl = set(target_tokens.values())
         retrieval_pool = RetrievalPool(
-            tokenizer, 
-            seed=args.seed, 
-            use_sentiment_scrub=args.sentiment_scrub
+            tokenizer,
+            seed=args.seed,
+            use_sentiment_scrub=args.sentiment_scrub,
+            extra_blacklist_ids=extra_bl
         )
         retrieval_pool.build_pool(all_input_ids, all_rationale_masks)
-    
+    else:
+        target_tokens = get_target_tokens(args.dataset, tokenizer)
+
     # Get extractor
     from ice import get_extractor
-    
-    target_tokens = get_target_tokens(args.dataset, tokenizer)
     
     all_results = {}
     

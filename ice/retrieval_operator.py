@@ -38,7 +38,9 @@ class RetrievalPool:
     LABEL_BLACKLIST = {
         "positive", "negative", "Positive", "Negative",
         "entailment", "neutral", "contradiction",
-        "true", "false", "yes", "no"
+        "true", "false", "yes", "no",
+        "World", "Sports", "Business", "Technology",
+        "world", "sports", "business", "technology",
     }
     
     SENTIMENT_SCRUB = {
@@ -46,17 +48,20 @@ class RetrievalPool:
         "wonderful", "bad", "good", "best", "worst", "love", "hate"
     }
     
-    def __init__(self, tokenizer, seed: int = 42, use_sentiment_scrub: bool = False):
+    def __init__(self, tokenizer, seed: int = 42, use_sentiment_scrub: bool = False,
+                 extra_blacklist_ids: Set[int] = None):
         self.tokenizer = tokenizer
         self.rng = np.random.default_rng(seed)
         self.use_sentiment_scrub = use_sentiment_scrub
-        
+
         # Pool: list of (token_id, example_id)
         self.token_pool: List[Tuple[int, int]] = []
         self.blacklist_ids: Set[int] = set()
         self._built = False
-        
+
         self._build_blacklist_ids()
+        if extra_blacklist_ids:
+            self.blacklist_ids.update(extra_blacklist_ids)
     
     def _build_blacklist_ids(self):
         """Convert blacklisted words to token IDs."""
