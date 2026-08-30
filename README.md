@@ -8,7 +8,7 @@ Official implementation of **"ICE: Intervention-Consistent Explanation Evaluatio
 
 ## Key Finding
 
-Faithfulness is **operator-dependent**: switching the intervention operator flips the faithfulness verdict in **36% of configurations**, with gaps up to 44 percentage points. One-third of configurations are anti-faithful (worse than random), invisible without randomized baselines.
+Faithfulness is **operator-dependent**: switching the intervention operator crosses the positive-evidence threshold in **18% of configurations** (5/28), with gaps up to 44 percentage points. One-third of configurations are anti-faithful (worse than random), invisible without randomized baselines.
 
 ## What ICE Does
 
