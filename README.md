@@ -36,17 +36,16 @@ pip install ice-faithfulness
 from ice import ICEEvaluator, ICEConfig
 
 config = ICEConfig(
-    k=0.2,                # top 20% tokens as rationale
-    n_permutations=50,    # random baselines
-    operators=["delete", "retrieval"],
+    k_values=[0.2],          # top 20% tokens as rationale
+    n_permutations=50,        # random baselines
+    operators="lite",         # "lite" (delete+retrieval) or "full"
 )
 
 evaluator = ICEEvaluator(model, tokenizer, config)
-result = evaluator.evaluate(dataset, extractor="attention")
+results = evaluator.evaluate_dataset(dataset, extractor="attention")
 
-print(f"Win Rate: {result.win_rate:.1%}")
-print(f"Effect Size: {result.effect_size:.2f}")
-print(f"Operators agree: {result.operators_agree}")
+print(f"Win Rate: {results.win_rate:.1%}")
+print(f"Effect Size (d_null): {results.effect_size:.2f}")
 ```
 
 ## Core Modules
