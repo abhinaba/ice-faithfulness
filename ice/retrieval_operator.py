@@ -140,13 +140,11 @@ class RetrievalInfillOperator(BaseOperator):
         if self.pool is None:
             self.pool = RetrievalPool(self.tokenizer, seed=self.seed,
                                      use_sentiment_scrub=self.use_sentiment_scrub)
-        if not self.pool._built:
-            self._collected_inputs.append(input_ids.clone().cpu())
-            self._collected_masks.append(rationale_mask.clone().cpu())
-            if len(self._collected_inputs) >= 10:
-                self.pool.build_pool(self._collected_inputs, self._collected_masks)
-            else:
-                self.pool.build_pool(self._collected_inputs, self._collected_masks)
+        # Always collect examples and rebuild so the pool grows
+        self._collected_inputs.append(input_ids.clone().cpu())
+        self._collected_masks.append(rationale_mask.clone().cpu())
+        self._current_example_id = len(self._collected_inputs) - 1
+        self.pool.build_pool(self._collected_inputs, self._collected_masks)
     
     def set_pool(self, pool: RetrievalPool):
         self.pool = pool

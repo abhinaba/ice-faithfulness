@@ -149,8 +149,10 @@ def parse_args():
     parser.add_argument("--model", type=str, default="gpt2", help="HuggingFace model")
     parser.add_argument("--languages", nargs="+", default=["french", "german"], 
                         choices=LANGUAGES, help="Languages to evaluate")
-    parser.add_argument("--extractor", type=str, default="gradient", 
+    parser.add_argument("--extractor", type=str, default="gradient",
                         choices=["gradient", "attention"], help="Extraction method")
+    parser.add_argument("--operators", type=str, default="deletion",
+                        choices=["deletion", "both"], help="Operator: deletion only, or both deletion+retrieval")
     parser.add_argument("--max_examples", type=int, default=100)
     parser.add_argument("--k", type=float, default=0.2, help="Rationale budget")
     parser.add_argument("--n_permutations", type=int, default=50)
@@ -411,9 +413,9 @@ def evaluate_example_attention(model, tokenizer, text, lang, k, n_permutations, 
     if confidence < 0.4:
         return None
     
-    # Get importance from attention (last layer, last token, average over heads)
-    attentions = outputs.attentions[-1]  # Last layer
-    attn_weights = attentions[0, :, -1, :].mean(dim=0)  # Average over heads, last token query
+    # Get importance from attention (average across ALL layers and heads, last token query)
+    all_layers = torch.stack(outputs.attentions)  # [n_layers, batch, heads, seq, seq]
+    attn_weights = all_layers[:, 0, :, -1, :].mean(dim=0).mean(dim=0)  # avg layers, avg heads
     importance = attn_weights.cpu()
     
     # Get top-k tokens
