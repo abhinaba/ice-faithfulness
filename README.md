@@ -8,7 +8,7 @@ Official implementation of **"ICE: Intervention-Consistent Explanation Evaluatio
 
 ## Key Finding
 
-Faithfulness is **operator-dependent**: switching the intervention operator crosses the positive-evidence threshold in **18% of configurations** (5/28), with gaps up to 44 percentage points. One-third of configurations are anti-faithful (worse than random), invisible without randomized baselines.
+Faithfulness is **operator-dependent**: switching the intervention operator crosses the positive-evidence threshold in **18% of configurations** (5/28), with gaps up to 44 percentage points. Nearly one-third of English deletion configurations are anti-faithful (18/56, worse than random), invisible without randomized baselines.
 
 ## What ICE Does
 
@@ -38,7 +38,7 @@ from ice import ICEEvaluator, ICEConfig
 config = ICEConfig(
     k_values=[0.2],          # top 20% tokens as rationale
     n_permutations=50,        # random baselines
-    operators="lite",         # "lite" (delete+mask) or "full"
+    operators="lite",         # "lite" (delete+retrieval) or "full"
 )
 
 evaluator = ICEEvaluator(model, tokenizer, config)
