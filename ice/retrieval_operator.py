@@ -136,15 +136,18 @@ class RetrievalInfillOperator(BaseOperator):
         self._collected_masks = []
 
     def _ensure_pool(self, input_ids, attention_mask, rationale_mask):
-        """Auto-build pool from collected examples if not already built."""
+        """Ensure pool is available. If not pre-built via set_pool(), build from current example."""
+        if self.pool is not None and self.pool._built:
+            return
         if self.pool is None:
             self.pool = RetrievalPool(self.tokenizer, seed=self.seed,
                                      use_sentiment_scrub=self.use_sentiment_scrub)
-        # Always collect examples and rebuild so the pool grows
-        self._collected_inputs.append(input_ids.clone().cpu())
-        self._collected_masks.append(rationale_mask.clone().cpu())
-        self._current_example_id = len(self._collected_inputs) - 1
-        self.pool.build_pool(self._collected_inputs, self._collected_masks)
+        if not self.pool._built:
+            # Fallback: build minimal pool from current example (not ideal, but won't crash)
+            self.pool.build_pool(
+                [input_ids.clone().cpu()],
+                [rationale_mask.clone().cpu()]
+            )
     
     def set_pool(self, pool: RetrievalPool):
         self.pool = pool

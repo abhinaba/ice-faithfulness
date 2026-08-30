@@ -370,6 +370,42 @@ class ICEEvaluator:
             "null_std": null_std
         }
     
+    def _pre_build_retrieval_pool(self, all_items, k):
+        """Pre-build retrieval pool from all examples for leave-one-out sampling."""
+        from .retrieval_operator import RetrievalInfillOperator, RetrievalPool
+        retrieval_ops = [op for op in self.operators if isinstance(op, RetrievalInfillOperator)]
+        if not retrieval_ops:
+            return
+
+        all_ids = []
+        all_masks = []
+        for item in all_items:
+            if isinstance(item, dict):
+                ids = item["input_ids"]
+                mask = item["attention_mask"]
+            else:
+                ids, mask, _ = item
+            if not isinstance(ids, torch.Tensor):
+                ids = torch.tensor(ids)
+            if not isinstance(mask, torch.Tensor):
+                mask = torch.tensor(mask)
+            if ids.dim() == 2:
+                ids = ids.squeeze(0)
+            if mask.dim() == 2:
+                mask = mask.squeeze(0)
+            all_ids.append(ids)
+            # Use top-k as rationale mask for pool building
+            n_tokens = max(1, int(k * mask.sum().item()))
+            rmask = torch.zeros_like(mask)
+            rmask[:n_tokens] = 1  # placeholder — pool uses all non-special tokens
+            all_masks.append(rmask)
+
+        pool = RetrievalPool(self.tokenizer, seed=self.config.seed)
+        pool.build_pool(all_ids, all_masks)
+
+        for op in retrieval_ops:
+            op.set_pool(pool)
+
     def evaluate_dataset(
         self,
         dataset,
@@ -398,14 +434,26 @@ class ICEEvaluator:
         example_results = []
         auc_suf_scores = []
         auc_comp_scores = []
-        
-        iterator = dataset
+
+        # Materialize dataset for pre-building retrieval pool
+        all_items = list(dataset)
         if max_examples:
-            iterator = list(dataset)[:max_examples]
+            all_items = all_items[:max_examples]
+
+        # Pre-build retrieval pool from ALL examples (for leave-one-out)
+        self._pre_build_retrieval_pool(all_items, k)
+
+        iterator = all_items
         if show_progress:
-            iterator = tqdm(iterator, desc="ICE Evaluation")
-        
-        for item in iterator:
+            iterator = tqdm(all_items, desc="ICE Evaluation")
+
+        for ex_idx, item in enumerate(iterator):
+            # Set current example ID for leave-one-out retrieval
+            from .retrieval_operator import RetrievalInfillOperator
+            for op in self.operators:
+                if isinstance(op, RetrievalInfillOperator):
+                    op.set_current_example(ex_idx)
+
             # Handle both dict and tuple formats
             if isinstance(item, dict):
                 input_ids = item["input_ids"]
@@ -428,9 +476,15 @@ class ICEEvaluator:
                     input_ids=ids.to(self.config.device),
                     attention_mask=mask.to(self.config.device)
                 )
-                probs = torch.softmax(outputs.logits, dim=-1)
+                logits = outputs.logits
+                # Handle causal LMs: logits are [batch, seq, vocab]
+                if logits.dim() == 3:
+                    seq_lengths = mask.sum(dim=-1) - 1
+                    last_pos = seq_lengths[0].long().to(logits.device)
+                    logits = logits[0, last_pos, :].unsqueeze(0)
+                probs = torch.softmax(logits, dim=-1)
                 confidence = probs.max().item()
-                target_class = outputs.logits.argmax(dim=-1).item()
+                target_class = logits.argmax(dim=-1).item()
             
             # Skip low-confidence examples where NSD is unstable
             if confidence < 0.5:
