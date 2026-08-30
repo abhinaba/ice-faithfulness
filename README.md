@@ -78,7 +78,7 @@ python scripts_for_repo/run_ice_llm_retrieval.py --model mistral-7b --dataset es
 | Metric | Range | Meaning |
 |--------|-------|---------|
 | Win Rate | 0-100% | % of random baselines beaten by the rationale |
-| Effect Size | Cohen's d | Magnitude (>0.8 = large, <0 = anti-faithful) |
+| Effect Size | d_null | Standardized distance from null (>0.8 = large, <0 = anti-faithful) |
 | Operator Agreement | bool | Both operators give same verdict |
 
 ## Results Summary
@@ -88,7 +88,7 @@ Evaluated on **7 LLMs** (1.5B-8B), **4 English tasks**, **6 non-English language
 - Operator gaps reach **44 pp** (e.g., Llama-3.2 e-SNLI: 86% deletion vs 43% retrieval)
 - **Anti-faithfulness** in 1/3 of configurations (gradient selects function words)
 - No correlation between faithfulness and human plausibility (|r| < 0.04)
-- Cross-lingual faithfulness spans 16%-83%, not predicted by tokenization alone
+- Cross-lingual faithfulness spans 12%-83%, not predicted by tokenization alone
 
 ## Citation
 
