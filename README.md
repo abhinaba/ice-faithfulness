@@ -67,7 +67,7 @@ print(f"Operators agree: {result.operators_agree}")
 python scripts_for_repo/run_ice_llm.py --model llama-3.2-3b --dataset sst2
 
 # Multilingual (6 languages)
-python scripts_for_repo/run_ice_multilingual.py --model qwen-2.5-7b --lang french
+python scripts_for_repo/run_ice_multilingual.py --model qwen-2.5-7b --languages french
 
 # Operator comparison
 python scripts_for_repo/run_ice_llm_retrieval.py --model mistral-7b --dataset esnli
