@@ -38,7 +38,7 @@ from ice import ICEEvaluator, ICEConfig
 config = ICEConfig(
     k_values=[0.2],          # top 20% tokens as rationale
     n_permutations=50,        # random baselines
-    operators="lite",         # "lite" (delete+retrieval) or "full"
+    operators="lite",         # "lite" (delete+mask) or "full"
 )
 
 evaluator = ICEEvaluator(model, tokenizer, config)
@@ -85,7 +85,7 @@ python scripts_for_repo/run_ice_llm_retrieval.py --model mistral-7b --dataset es
 Evaluated on **7 LLMs** (1.5B-8B), **4 English tasks**, **6 non-English languages**, **2 attribution methods**:
 
 - Operator gaps reach **44 pp** (e.g., Llama-3.2 e-SNLI: 86% deletion vs 43% retrieval)
-- **Anti-faithfulness** in 1/3 of configurations (gradient selects function words)
+- **Anti-faithfulness** in nearly 1/3 of English deletion configurations (18/56; gradient selects function words)
 - No correlation between faithfulness and human plausibility (|r| < 0.04)
 - Cross-lingual faithfulness spans 12%-83%, not predicted by tokenization alone
 
